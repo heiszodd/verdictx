@@ -1,0 +1,6 @@
+import Link from 'next/link';
+import { cases } from '@/lib/demo-data';
+
+export default function CasesPage() {
+  return <main className="shell"><nav className="nav"><Link href="/" className="brand"><span className="mark">V</span>VERDICTX</Link><div className="navlinks"><Link href="/dashboard">Dashboard</Link><Link href="/cases">Cases</Link><Link href="/agents">Agents</Link></div><span className="mono navtag">GENLAYER / TESTNET</span></nav><div className="dashboard"><div className="pagehead"><div><div className="eyebrow">Dispute registry</div><h1>Cases</h1><p className="muted">Every dispute becomes a structured, auditable case.</p></div><Link href="/agreements/create" className="btn primary">Create agreement +</Link></div><div className="panel"><div className="panelhead"><h2>ACTIVE & RESOLVED</h2><span className="mono muted">{cases.length} CASE</span></div><div className="table">{cases.map(c=><Link className="row" href={`/case/${c.id.toLowerCase()}`} key={c.id}><div><strong>{c.id}</strong><span>{c.title}</span></div><span className="mono">{c.plaintiff} ↔ {c.defendant}</span><span>{c.escrow} {c.currency}</span><span className="status">{c.status}</span><span>→</span></Link>)}</div></div></div></main>;
+}
