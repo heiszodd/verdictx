@@ -1,8 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { createClient } from 'genlayer-js';
-import { testnetBradbury } from 'genlayer-js/chains';
 import { parseVerdict, type AdjudicationVerdict } from '@/lib/genlayer/parse-verdict';
 import { requireContractAddress, submitAdjudication, waitForAdjudication } from '@/lib/genlayer/client';
 
@@ -12,7 +10,6 @@ const dispute = 'ResearchBuyer_01 disputes entries 4, 11, and 18 because the evi
 const evidenceUrls = ['https://www.cbn.gov.ng/', 'https://www.nibss-plc.com.ng/'];
 
 type EthereumProvider = { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> };
-
 declare global { interface Window { ethereum?: EthereumProvider } }
 
 export default function AdjudicationControl({ onVerdict }: { onVerdict?: (verdict: AdjudicationVerdict) => void }) {
@@ -23,27 +20,20 @@ export default function AdjudicationControl({ onVerdict }: { onVerdict?: (verdic
   async function start() {
     setError('');
     try {
-      const contract = requireContractAddress();
-      if (!contract || contract === '0x0000000000000000000000000000000000000000') throw new Error('Set NEXT_PUBLIC_VERDICTX_CONTRACT_ADDRESS to a deployed contract before using live adjudication.');
+      requireContractAddress();
       if (!window.ethereum) throw new Error('No EVM wallet detected. Install a browser wallet and connect it to GenLayer Bradbury.');
-
       setStatus('CONNECTING WALLET');
       const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' }) as string[];
       const address = accounts?.[0];
       if (!address) throw new Error('Wallet returned no account.');
-
-      const client = createClient({ chain: testnetBradbury, account: address, provider: window.ethereum });
-      await client.connect('testnetBradbury');
-
       setStatus('ESTIMATING FEES');
-      const hash = await submitAdjudication(address, agreement, delivery, dispute, evidenceUrls);
+      const hash = await submitAdjudication(address, agreement, delivery, dispute, evidenceUrls, window.ethereum);
       setTx(hash);
       setStatus('CONSENSUS IN PROGRESS');
-
       const receipt = await waitForAdjudication(hash);
-      const raw = receipt?.txDataDecoded?.returnData ?? receipt?.txExecutionResult ?? receipt?.data ?? '';
-      const verdict = parseVerdict(String(raw));
-      onVerdict?.(verdict);
+      const raw = (receipt as any)?.txDataDecoded?.returnData ?? (receipt as any)?.txExecutionResult ?? '';
+      if (!raw) throw new Error('Decision reached but no return payload was exposed by the client.');
+      onVerdict?.(parseVerdict(String(raw)));
       setStatus('DECISION REACHED');
     } catch (e) {
       setStatus('ERROR');
