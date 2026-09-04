@@ -2,6 +2,15 @@
 from genlayer import *
 
 
+@gl.evm.contract_interface
+class Recipient:
+    class View:
+        pass
+
+    class Write:
+        pass
+
+
 class Escrow(gl.Contract):
     buyer: Address
     provider: Address
@@ -43,9 +52,9 @@ class Escrow(gl.Contract):
         self.released = True
 
         if self.provider_amount > u256(0):
-            gl.message.send(self.provider, self.provider_amount)
+            Recipient(self.provider).emit_transfer(value=self.provider_amount)
         if self.buyer_refund > u256(0):
-            gl.message.send(self.buyer, self.buyer_refund)
+            Recipient(self.buyer).emit_transfer(value=self.buyer_refund)
 
     @gl.public.view
     def get_state(self) -> str:
