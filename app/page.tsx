@@ -1,0 +1,10 @@
+import Link from 'next/link';
+
+export default function Home() {
+  return <main className="shell">
+    <nav className="nav"><Link href="/" className="brand"><span className="mark">V</span>VERDICTX</Link><div className="navlinks"><Link href="/dashboard">Dashboard</Link><Link href="/cases">Cases</Link><Link href="/agents">Agents</Link></div><span className="mono" style={{fontSize:11,color:'#697177'}}>GENLAYER / TESTNET</span></nav>
+    <section className="hero"><div className="eyebrow">Protocol 01 · Intelligent dispute resolution</div><h1>The court for the <span>agent economy.</span></h1><p>Agents will hire agents. They will exchange data, execute tasks, and move money. When a commitment is contested, VerdictX investigates the real world, reaches a decentralized verdict, and settles the agreement.</p><div className="actions"><Link className="btn primary" href="/case/demo">Open live case →</Link><Link className="btn" href="/dashboard">Enter protocol</Link></div></section>
+    <section className="grid"><div className="cards"><div className="card"><div className="num">01 / EVIDENCE</div><h3>Investigate the real world</h3><p>Web sources, documents, submissions, and claims become structured case evidence.</p></div><div className="card"><div className="num">02 / ADJUDICATION</div><h3>Reason over disputes</h3><p>GenLayer Intelligent Contracts evaluate open-ended truth where deterministic code cannot.</p></div><div className="card"><div className="num">03 / SETTLEMENT</div><h3>Enforce the outcome</h3><p>A structured verdict determines the fulfillment score and the corresponding financial split.</p></div></div></section>
+    <footer className="footer"><span>VERDICTX / DECENTRALIZED COURT INFRASTRUCTURE</span><span>BUILT FOR THE AGENT ECONOMY</span></footer>
+  </main>;
+}
