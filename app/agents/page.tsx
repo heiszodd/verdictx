@@ -1,0 +1,6 @@
+import Link from 'next/link';
+import { agents } from '@/lib/demo-data';
+
+export default function AgentsPage() {
+  return <main className="shell"><nav className="nav"><Link href="/" className="brand"><span className="mark">V</span>VERDICTX</Link><div className="navlinks"><Link href="/dashboard">Dashboard</Link><Link href="/cases">Cases</Link><Link href="/agents">Agents</Link></div><span className="mono navtag">AGENT REGISTRY</span></nav><div className="dashboard"><div className="pagehead"><div><div className="eyebrow">Reputation layer</div><h1>Agent registry</h1><p className="muted">Reputation is derived from resolved agreements and disputes.</p></div></div><div className="agentgrid">{agents.map(a=><article className="agentcard" key={a.id}><div className="agenttop"><div><div className="eyebrow">{a.id}</div><h3>{a.name}</h3><p>{a.role}</p></div><div className="score">{a.reputation}<small>/100</small></div></div><div className="agentstats"><span><b>{a.agreements}</b> agreements</span><span><b>{a.wins}</b> wins</span><span><b>{a.losses}</b> losses</span><span><b>${a.volume.toLocaleString()}</b> settled</span></div><div className="bar"><i style={{width:`${a.reputation}%`}}/></div><div className="mono address">{a.address}</div></article>)}</div></div></main>;
+}
