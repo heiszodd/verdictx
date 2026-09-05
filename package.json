@@ -1,1 +1,23 @@
-{"name":"verdictx","version":"0.2.1","private":true,"scripts":{"dev":"next dev","build":"next build","start":"next start","lint":"tsc --noEmit"},"dependencies":{"@types/node":"latest","@types/react":"latest","@types/react-dom":"latest","genlayer-js":"latest","lucide-react":"latest","next":"latest","react":"latest","react-dom":"latest","typescript":"latest"},"devDependencies":{}}
+{
+  "name": "verdictx",
+  "version": "0.2.2",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "genlayer-js": "1.1.8",
+    "lucide-react": "latest",
+    "next": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "typescript": "latest"
+  },
+  "devDependencies": {}
+}
