@@ -10,17 +10,8 @@ declare global { interface Window { ethereum?: EthereumProvider } }
 const INDEX_KEY = 'verdictx:cases';
 
 type StoredCase = {
-  id: string;
-  title: string;
-  task: string;
-  criteria: string;
-  escrow: string;
-  disputeWindow: string;
-  provider: string;
-  contractAddress: string;
-  deploymentTx: string;
-  buyer: string;
-  createdAt: string;
+  id: string; title: string; task: string; criteria: string; escrow: string; disputeWindow: string; provider: string;
+  contractAddress: string; deploymentTx: string; buyer: string; createdAt: string;
 };
 
 function errorMessage(error: unknown) {
@@ -48,9 +39,10 @@ export default function CreateAgreement() {
     setError('');
     try {
       if (!window.ethereum) throw new Error('No browser wallet detected. Install a wallet such as MetaMask.');
-      if (!provider.trim()) throw new Error('Provider wallet address is required.');
-      if (!/^0x[a-fA-F0-9]{40}$/.test(provider.trim())) throw new Error('Provider address must be a valid EVM address.');
+      const providerAddress = provider.trim();
+      if (!/^0x[a-fA-F0-9]{40}$/.test(providerAddress)) throw new Error('Provider address must be a valid EVM address.');
       if (!title.trim() || !task.trim() || !criteria.trim()) throw new Error('Title, task, and acceptance criteria are required.');
+      if (!/^\d+(\.\d{1,18})?$/.test(escrow.trim()) || Number(escrow) <= 0) throw new Error('Escrow target must be a positive GEN amount.');
 
       setStatus('CONNECTING WALLET');
       const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' }) as string[];
@@ -59,21 +51,9 @@ export default function CreateAgreement() {
 
       const id = `VX-${Date.now().toString(36).toUpperCase()}`;
       setStatus('DEPLOYING CASE CONTRACT');
-      const deployed = await deployVerdictXCase(buyer as `0x${string}`, id, window.ethereum);
+      const deployed = await deployVerdictXCase(buyer as `0x${string}`, id, providerAddress as `0x${string}`, window.ethereum);
 
-      const record: StoredCase = {
-        id,
-        title: title.trim(),
-        task: task.trim(),
-        criteria: criteria.trim(),
-        escrow: escrow.trim(),
-        disputeWindow: disputeWindow.trim(),
-        provider: provider.trim(),
-        contractAddress: deployed.address,
-        deploymentTx: deployed.hash,
-        buyer,
-        createdAt: new Date().toISOString(),
-      };
+      const record: StoredCase = { id, title: title.trim(), task: task.trim(), criteria: criteria.trim(), escrow: escrow.trim(), disputeWindow: disputeWindow.trim(), provider: providerAddress, contractAddress: deployed.address, deploymentTx: deployed.hash, buyer, createdAt: new Date().toISOString() };
       const existing = JSON.parse(localStorage.getItem(INDEX_KEY) || '[]') as StoredCase[];
       localStorage.setItem(INDEX_KEY, JSON.stringify([record, ...existing.filter((item) => item.contractAddress !== record.contractAddress)]));
       setStatus('CREATED');
@@ -85,6 +65,5 @@ export default function CreateAgreement() {
   }
 
   const busy = status === 'CONNECTING WALLET' || status === 'DEPLOYING CASE CONTRACT';
-
-  return <main className="shell"><nav className="nav"><Link href="/" className="brand"><span className="mark">V</span>VERDICTX</Link><div className="navlinks"><Link href="/dashboard">Dashboard</Link><Link href="/cases">Cases</Link><Link href="/agents">Agents</Link></div></nav><div className="formwrap"><div className="eyebrow">Agreement engine / New commitment</div><h1>Create an agreement</h1><p className="muted intro">Deploy a real case contract to GenLayer Bradbury. The contract address and deployment transaction are saved with the case.</p><div className="formgrid"><label>Title<input value={title} onChange={(e)=>setTitle(e.target.value)} /></label><label>Escrow target (GEN)<input inputMode="decimal" value={escrow} onChange={(e)=>setEscrow(e.target.value)} /></label><label>Provider wallet<input placeholder="0x..." value={provider} onChange={(e)=>setProvider(e.target.value)} /></label><label>Dispute window<input value={disputeWindow} onChange={(e)=>setDisputeWindow(e.target.value)} /></label><label className="full">Task<textarea value={task} onChange={(e)=>setTask(e.target.value)} /></label><label className="full">Acceptance criteria<textarea value={criteria} onChange={(e)=>setCriteria(e.target.value)} /></label></div><div className="formactions"><Link href="/agreements" className="btn">Cancel</Link><button className="btn primary" onClick={create} disabled={busy}>{busy ? status : 'Deploy agreement →'}</button></div>{error&&<div className="error">{error}</div>}<div className="notice">The case contract is real and deployed through GenLayerJS. Funding is intentionally not represented as a fake success state; the live escrow rail will be wired after the contract deployment is verified.</div></div></main>;
+  return <main className="shell"><nav className="nav"><Link href="/" className="brand"><span className="mark">V</span>VERDICTX</Link><div className="navlinks"><Link href="/dashboard">Dashboard</Link><Link href="/cases">Cases</Link><Link href="/agents">Agents</Link></div></nav><div className="formwrap"><div className="eyebrow">Agreement engine / New commitment</div><h1>Create an agreement</h1><p className="muted intro">Deploy a real provider-bound case contract to GenLayer Bradbury. After deployment, the buyer can fund the escrow from this case page.</p><div className="formgrid"><label>Title<input value={title} onChange={(e)=>setTitle(e.target.value)} /></label><label>Escrow target (GEN)<input inputMode="decimal" value={escrow} onChange={(e)=>setEscrow(e.target.value)} /></label><label>Provider wallet<input placeholder="0x..." value={provider} onChange={(e)=>setProvider(e.target.value)} /></label><label>Dispute window<input value={disputeWindow} onChange={(e)=>setDisputeWindow(e.target.value)} /></label><label className="full">Task<textarea value={task} onChange={(e)=>setTask(e.target.value)} /></label><label className="full">Acceptance criteria<textarea value={criteria} onChange={(e)=>setCriteria(e.target.value)} /></label></div><div className="formactions"><Link href="/agreements" className="btn">Cancel</Link><button className="btn primary" onClick={create} disabled={busy}>{busy ? status : 'Deploy agreement →'}</button></div>{error&&<div className="error">{error}</div>}<div className="notice">The contract stores the buyer, provider, funding state, adjudication result, settlement split, provider payout, and buyer refund on-chain. GEN funding and settlement require wallet signatures.</div></div></main>;
 }
