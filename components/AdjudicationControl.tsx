@@ -8,7 +8,6 @@ import {
   submitAdjudication,
   type AdjudicationStatus,
   type VerdictXTransaction,
-  waitForAdjudication,
 } from '@/lib/genlayer/client';
 
 const agreement = 'Deliver 20 legitimate Nigerian fintech companies with verifiable operating evidence. Each entry must satisfy the geographic and company-type criteria.';
@@ -36,9 +35,7 @@ function getErrorMessage(error: unknown): string {
 function labelForStatus(snapshot: AdjudicationStatus | null): string {
   if (!snapshot) return 'IDLE';
   if (snapshot.status === 'PENDING') {
-    return snapshot.queuePosition != null
-      ? `QUEUED · POSITION ${snapshot.queuePosition}`
-      : 'QUEUED · WAITING FOR ACTIVATION';
+    return snapshot.queuePosition != null ? `QUEUED · POSITION ${snapshot.queuePosition}` : 'QUEUED · WAITING FOR ACTIVATION';
   }
   if (snapshot.status === 'PROPOSING') return 'LEADER PROPOSING';
   if (snapshot.status === 'COMMITTING') return 'VALIDATORS COMMITTING';
@@ -55,46 +52,47 @@ export default function AdjudicationControl({ onVerdict }: { onVerdict?: (verdic
   const [tx, setTx] = useState<VerdictXTransaction | ''>('');
   const [error, setError] = useState('');
 
-  async function track(hash: VerdictXTransaction) {
-    setTx(hash);
-    setStatus('CHECKING TRANSACTION');
-    try {
-      const receipt = await waitForAdjudication(hash, (next) => {
-        setSnapshot(next);
-        setStatus(labelForStatus(next));
-      });
-      localStorage.removeItem(STORAGE_KEY);
-      const raw = receipt?.txDataDecoded?.returnData ?? receipt?.txExecutionResult ?? '';
-      if (!raw) throw new Error('Decision reached but no return payload was exposed by the client.');
-      onVerdict?.(parseVerdict(String(raw)));
-      setStatus('DECISION REACHED');
-    } catch (e) {
-      setError(getErrorMessage(e));
-      setStatus('TRACKING PAUSED');
-    }
+  async function check(hash: VerdictXTransaction) {
+    const next = await getAdjudicationTransaction(hash);
+    setSnapshot(next);
+    setStatus(labelForStatus(next));
+    return next;
   }
 
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY) as VerdictXTransaction | null;
     if (!saved) return;
     setTx(saved);
-    getAdjudicationTransaction(saved)
-      .then((next) => {
-        setSnapshot(next);
-        setStatus(labelForStatus(next));
-        return track(saved);
-      })
-      .catch((e) => {
-        setStatus('TRACKING PAUSED');
-        setError(getErrorMessage(e));
-      });
-  }, []);
+    check(saved).catch((e) => {
+      setStatus('TRACKING PAUSED');
+      setError(getErrorMessage(e));
+    });
 
-  async function startOrResume() {
+    const timer = window.setInterval(async () => {
+      try {
+        const next = await check(saved);
+        if (['ACCEPTED', 'FINALIZED'].includes(next.status)) {
+          const raw = next.raw?.txDataDecoded?.returnData ?? next.raw?.txExecutionResult ?? '';
+          if (raw) {
+            localStorage.removeItem(STORAGE_KEY);
+            onVerdict?.(parseVerdict(String(raw)));
+          }
+          window.clearInterval(timer);
+        }
+      } catch (e) {
+        console.error('VerdictX transaction tracking error:', e);
+      }
+    }, 10000);
+
+    return () => window.clearInterval(timer);
+  }, [onVerdict]);
+
+  async function start() {
     setError('');
     const saved = localStorage.getItem(STORAGE_KEY) as VerdictXTransaction | null;
     if (saved) {
-      await track(saved);
+      setTx(saved);
+      await check(saved);
       return;
     }
 
@@ -109,7 +107,7 @@ export default function AdjudicationControl({ onVerdict }: { onVerdict?: (verdic
       const hash = await submitAdjudication(address as `0x${string}`, agreement, delivery, dispute, evidenceUrls, window.ethereum);
       localStorage.setItem(STORAGE_KEY, hash);
       setTx(hash);
-      await track(hash);
+      await check(hash);
     } catch (e) {
       console.error('VerdictX adjudication error:', e);
       setStatus('ERROR');
@@ -117,23 +115,18 @@ export default function AdjudicationControl({ onVerdict }: { onVerdict?: (verdic
     }
   }
 
-  const buttonLabel = status === 'IDLE'
-    ? 'Start live adjudication →'
-    : status === 'TRACKING PAUSED'
-      ? 'Resume adjudication'
-      : status === 'ERROR'
-        ? 'Retry submission'
-        : status;
-  const busy = status !== 'IDLE' && status !== 'ERROR' && status !== 'TRACKING PAUSED';
+  const buttonLabel = status === 'IDLE' ? 'Start live adjudication →' : status === 'TRACKING PAUSED' ? 'Resume tracking' : status === 'ERROR' ? 'Retry submission' : status === 'PENDING' ? 'Awaiting GenLayer…' : status;
+  const busy = ['CONNECTING WALLET', 'SUBMITTING TO GENLAYER'].includes(status);
 
   return <div>
-    <button className="btn primary" onClick={startOrResume} disabled={busy}>
+    <button className="btn primary" onClick={start} disabled={busy}>
       {buttonLabel}
     </button>
     {tx && <div className="tx mono">TX {tx}</div>}
     {snapshot && <div className="mono" style={{marginTop:8,fontSize:10,color:'#697177'}}>
       {snapshot.execution} · {snapshot.lifecycle || 'PROCESSING'}{snapshot.queuePosition != null ? ` · QUEUE ${snapshot.queuePosition}` : ''}
     </div>}
+    {snapshot?.status === 'PENDING' && <div style={{marginTop:10,fontSize:12,color:'#91989d'}}>Case submitted. GenLayer is processing the adjudication in the background. You can leave this page and return later.</div>}
     {error && <div className="error">{error}</div>}
   </div>;
 }
