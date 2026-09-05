@@ -7,6 +7,15 @@ type ClientAccount = `0x${string}`;
 type Eip1193Provider = { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> };
 
 const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_VERDICTX_CONTRACT_ADDRESS as `0x${string}` | undefined;
+const BRADBURY_CHAIN_ID = '0x107d'; // 4221
+
+const BRADBURY_NETWORK = {
+  chainId: BRADBURY_CHAIN_ID,
+  chainName: 'GenLayer Bradbury',
+  nativeCurrency: { name: 'GEN', symbol: 'GEN', decimals: 18 },
+  rpcUrls: ['https://rpc-bradbury.genlayer.com'],
+  blockExplorerUrls: ['https://explorer-bradbury.genlayer.com'],
+};
 
 export function getGenLayerClient(account?: ClientAccount, provider?: Eip1193Provider) {
   return createClient({
@@ -21,6 +30,25 @@ export function requireContractAddress() {
     throw new Error('NEXT_PUBLIC_VERDICTX_CONTRACT_ADDRESS is not configured');
   }
   return CONTRACT_ADDRESS;
+}
+
+async function ensureBradbury(provider: Eip1193Provider) {
+  const currentChainId = String(await provider.request({ method: 'eth_chainId' })).toLowerCase();
+  if (currentChainId === BRADBURY_CHAIN_ID) return;
+
+  try {
+    await provider.request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: BRADBURY_CHAIN_ID }],
+    });
+  } catch (error) {
+    const code = error && typeof error === 'object' ? (error as { code?: number }).code : undefined;
+    if (code !== 4902) throw error;
+    await provider.request({
+      method: 'wallet_addEthereumChain',
+      params: [BRADBURY_NETWORK],
+    });
+  }
 }
 
 export async function getVerdict(account?: ClientAccount) {
@@ -39,11 +67,11 @@ export async function submitAdjudication(
   const client = getGenLayerClient(account, provider);
 
   if (provider) {
-    await client.connect('testnetBradbury');
+    // Do the standard EIP-1193 chain switch directly. The SDK's connect()
+    // path probes wallet_getSnaps, which some browser wallets do not expose.
+    await ensureBradbury(provider);
   }
 
-  // This project is currently pinned to the installed GenLayerJS API,
-  // whose writeContract accepts value but does not expose the newer fees API.
   const txHash = await client.writeContract({
     address: requireContractAddress(),
     functionName: 'adjudicate',
