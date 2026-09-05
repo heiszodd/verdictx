@@ -9,7 +9,7 @@ type Eip1193Provider = { request: (args: { method: string; params?: unknown[] })
 const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_VERDICTX_CONTRACT_ADDRESS as `0x${string}` | undefined;
 const BRADBURY_CHAIN_ID = '0x107d';
 const POLL_INTERVAL_MS = 5_000;
-const MAX_POLLS = 360; // 30 minutes. A timeout here never means the transaction was lost.
+const MAX_POLLS = 360;
 
 const BRADBURY_NETWORK = {
   chainId: BRADBURY_CHAIN_ID,
@@ -37,7 +37,6 @@ export function requireContractAddress() {
 async function ensureBradbury(provider: Eip1193Provider) {
   const currentChainId = String(await provider.request({ method: 'eth_chainId' })).toLowerCase();
   if (currentChainId === BRADBURY_CHAIN_ID) return;
-
   try {
     await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: BRADBURY_CHAIN_ID }] });
   } catch (error) {
@@ -65,14 +64,12 @@ export async function submitAdjudication(
 ): Promise<VerdictXTransaction> {
   const client = getGenLayerClient(account, provider);
   if (provider) await ensureBradbury(provider);
-
   const txHash = await client.writeContract({
     address: requireContractAddress(),
     functionName: 'adjudicate',
     args: [agreement, delivery, dispute, evidenceUrls],
     value: 0n,
   });
-
   return txHash as VerdictXTransaction;
 }
 
@@ -80,7 +77,7 @@ export type AdjudicationStatus = {
   hash: VerdictXTransaction;
   status: string;
   execution: string;
-  lifecycle?: string;
+  lifecycle: string;
   queuePosition?: number | null;
   recipient?: string;
   raw: any;
@@ -106,7 +103,6 @@ export async function getAdjudicationTransaction(hash: VerdictXTransaction): Pro
   const client = getGenLayerClient();
   const transaction = await client.getTransaction({ hash: hash as any });
   const status = statusName(transaction);
-
   let queuePosition: number | null | undefined = transaction?.queuePosition;
   if (queuePosition === undefined && status === 'PENDING') {
     try {
@@ -116,7 +112,6 @@ export async function getAdjudicationTransaction(hash: VerdictXTransaction): Pro
       queuePosition = null;
     }
   }
-
   return {
     hash,
     status,
