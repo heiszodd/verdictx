@@ -19,7 +19,7 @@ function asGenLayerAccount(account: ClientAccount): GenLayerAccount { return { a
 export function getGenLayerClient(account?: ClientAccount, provider?: Eip1193Provider) {
   // Writes must use the browser's EIP-1193 provider. Without it genlayer-js
   // falls back to its HTTP transport, and viem reports "node has no signer accounts".
-  return createClient({ chain: testnetBradbury, account: account ? asGenLayerAccount(account) : undefined, provider: provider as any } as any);
+  return createClient({ chain: testnetBradbury, account: account, provider: provider as any } as any);
 }
 export function requireContractAddress() { return requireAddress(CONTRACT_ADDRESS, 'NEXT_PUBLIC_VERDICTX_CONTRACT_ADDRESS'); }
 async function ensureBradbury(provider: Eip1193Provider) { const currentChainId = String(await provider.request({ method: 'eth_chainId' })).toLowerCase(); if (currentChainId === BRADBURY_CHAIN_ID) return; try { await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: BRADBURY_CHAIN_ID }] }); } catch (error) { const code = error && typeof error === 'object' ? (error as { code?: number }).code : undefined; if (code !== 4902) throw error; await provider.request({ method: 'wallet_addEthereumChain', params: [BRADBURY_NETWORK] }); } }
