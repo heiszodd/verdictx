@@ -46,7 +46,7 @@ export async function submitAdjudication(
     address: requireContractAddress(),
     functionName: 'adjudicate',
     args: [agreement, delivery, dispute, evidenceUrls],
-    value: 0,
+    value: 0n,
   });
 
   return txHash as VerdictXTransaction;
