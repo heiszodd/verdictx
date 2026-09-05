@@ -1,8 +1,9 @@
 import { createClient } from 'genlayer-js';
 import { testnetBradbury } from 'genlayer-js/chains';
+import { ExecutionResult, TransactionStatus } from 'genlayer-js/types';
 
 export type VerdictXTransaction = `0x${string}`;
-type ClientAccount = string;
+type ClientAccount = `0x${string}`;
 type Eip1193Provider = { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> };
 
 const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_VERDICTX_CONTRACT_ADDRESS as `0x${string}` | undefined;
@@ -11,7 +12,7 @@ export function getGenLayerClient(account?: ClientAccount, provider?: Eip1193Pro
   return createClient({
     chain: testnetBradbury,
     ...(account ? { account } : {}),
-    ...(provider ? { provider } : {}),
+    ...(provider ? { provider: provider as any } : {}),
   });
 }
 
@@ -41,44 +42,49 @@ export async function submitAdjudication(
     await client.connect('testnetBradbury');
   }
 
-  const write = {
+  const txHash = await client.writeContract({
+    account,
     address: requireContractAddress(),
-    functionName: 'adjudicate' as const,
-    args: [agreement, delivery, dispute, evidenceUrls] as const,
-  };
+    functionName: 'adjudicate',
+    args: [agreement, delivery, dispute, evidenceUrls],
+    value: 0n,
+  });
 
-  const fees = await client.estimateTransactionFeesForWrite(write);
-  return client.writeContract({
-    ...write,
-    fees: {
-      distribution: fees.distribution,
-      feeValue: fees.feeValue,
-    },
-  }) as Promise<VerdictXTransaction>;
+  return txHash as VerdictXTransaction;
 }
 
-function assertSuccessful(transaction: { statusName?: string; txExecutionResultName?: string }) {
-  const accepted = transaction.statusName === 'Accepted' || transaction.statusName === 'Finalized';
-  const returned = transaction.txExecutionResultName === 'FinishedWithReturn';
+function assertSuccessful(transaction: any) {
+  const statusName = transaction?.statusName ?? transaction?.status_name;
+  const executionResultName = transaction?.txExecutionResultName ?? transaction?.tx_execution_result_name;
+  const accepted = statusName === TransactionStatus.ACCEPTED || statusName === TransactionStatus.FINALIZED;
+  const returned = executionResultName === ExecutionResult.FINISHED_WITH_RETURN;
+
   if (!accepted || !returned) {
     throw new Error(
-      `Transaction failed: ${transaction.statusName ?? 'Unknown'} / ${transaction.txExecutionResultName ?? 'Unknown'}`,
+      `Transaction failed: ${statusName ?? 'Unknown'} / ${executionResultName ?? 'Unknown'}`,
     );
   }
 }
 
 export async function waitForAdjudication(hash: VerdictXTransaction) {
-  const transaction = await getGenLayerClient().waitForDecision({ hash });
+  const transaction = await getGenLayerClient().waitForTransactionReceipt({
+    hash: hash as any,
+    status: TransactionStatus.ACCEPTED,
+  });
   assertSuccessful(transaction);
   return transaction;
 }
 
 export async function waitForAdjudicationFinalization(hash: VerdictXTransaction) {
-  const transaction = await getGenLayerClient().waitForFinalization({ hash });
+  const client = getGenLayerClient();
+  const transaction = await client.waitForTransactionReceipt({
+    hash: hash as any,
+    status: TransactionStatus.FINALIZED,
+  });
   assertSuccessful(transaction);
   return transaction;
 }
 
 export async function getAdjudicationTransaction(hash: VerdictXTransaction) {
-  return getGenLayerClient().getTransaction({ hash });
+  return getGenLayerClient().getTransaction({ hash: hash as any });
 }
