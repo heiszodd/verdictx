@@ -39,17 +39,11 @@ async function ensureBradbury(provider: Eip1193Provider) {
   if (currentChainId === BRADBURY_CHAIN_ID) return;
 
   try {
-    await provider.request({
-      method: 'wallet_switchEthereumChain',
-      params: [{ chainId: BRADBURY_CHAIN_ID }],
-    });
+    await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: BRADBURY_CHAIN_ID }] });
   } catch (error) {
     const code = error && typeof error === 'object' ? (error as { code?: number }).code : undefined;
     if (code !== 4902) throw error;
-    await provider.request({
-      method: 'wallet_addEthereumChain',
-      params: [BRADBURY_NETWORK],
-    });
+    await provider.request({ method: 'wallet_addEthereumChain', params: [BRADBURY_NETWORK] });
   }
 }
 
@@ -70,7 +64,6 @@ export async function submitAdjudication(
   provider?: Eip1193Provider,
 ): Promise<VerdictXTransaction> {
   const client = getGenLayerClient(account, provider);
-
   if (provider) await ensureBradbury(provider);
 
   const txHash = await client.writeContract({
@@ -98,19 +91,27 @@ function statusName(transaction: any): string {
 }
 
 function executionName(transaction: any): string {
-  return String(
-    transaction?.txExecutionResultName ?? transaction?.tx_execution_result_name ?? 'NOT_VOTED',
-  ).toUpperCase();
+  return String(transaction?.txExecutionResultName ?? transaction?.tx_execution_result_name ?? 'NOT_VOTED').toUpperCase();
+}
+
+function lifecycleForStatus(status: string): string {
+  if (status === 'PENDING' || status === 'PROPOSING' || status === 'COMMITTING' || status === 'REVEALING' || status === 'LEADER_REVEALING') return 'PROCESSING';
+  if (status === 'ACCEPTED' || status === 'UNDETERMINED' || status === 'VALIDATORS_TIMEOUT' || status === 'LEADER_TIMEOUT') return 'DECIDED';
+  if (status === 'FINALIZED') return 'FINALIZED';
+  if (status === 'CANCELED') return 'CANCELED';
+  return 'PROCESSING';
 }
 
 export async function getAdjudicationTransaction(hash: VerdictXTransaction): Promise<AdjudicationStatus> {
   const client = getGenLayerClient();
   const transaction = await client.getTransaction({ hash: hash as any });
+  const status = statusName(transaction);
 
   let queuePosition: number | null | undefined = transaction?.queuePosition;
-  if (queuePosition === undefined && statusName(transaction) === 'PENDING') {
+  if (queuePosition === undefined && status === 'PENDING') {
     try {
-      queuePosition = await client.getTransactionQueuePosition({ hash: hash as any });
+      const position = await client.getTransactionQueuePosition({ hash: hash as any });
+      queuePosition = typeof position === 'number' ? position : Number(position);
     } catch {
       queuePosition = null;
     }
@@ -118,9 +119,9 @@ export async function getAdjudicationTransaction(hash: VerdictXTransaction): Pro
 
   return {
     hash,
-    status: statusName(transaction),
+    status,
     execution: executionName(transaction),
-    lifecycle: transaction?.lifecycle,
+    lifecycle: lifecycleForStatus(status),
     queuePosition,
     recipient: transaction?.recipient,
     raw: transaction,
@@ -130,54 +131,34 @@ export async function getAdjudicationTransaction(hash: VerdictXTransaction): Pro
 function assertSuccessful(transaction: any) {
   const status = statusName(transaction);
   const execution = executionName(transaction);
-  const accepted = status === String(TransactionStatus.ACCEPTED).toUpperCase() ||
-    status === String(TransactionStatus.FINALIZED).toUpperCase();
+  const accepted = status === String(TransactionStatus.ACCEPTED).toUpperCase() || status === String(TransactionStatus.FINALIZED).toUpperCase();
   const returned = execution === String(ExecutionResult.FINISHED_WITH_RETURN).toUpperCase();
-
-  if (!accepted || !returned) {
-    throw new Error(`Transaction failed: ${status} / ${execution}`);
-  }
+  if (!accepted || !returned) throw new Error(`Transaction failed: ${status} / ${execution}`);
 }
 
-export async function waitForAdjudication(
-  hash: VerdictXTransaction,
-  onUpdate?: (status: AdjudicationStatus) => void,
-) {
+export async function waitForAdjudication(hash: VerdictXTransaction, onUpdate?: (status: AdjudicationStatus) => void) {
   for (let attempt = 0; attempt < MAX_POLLS; attempt += 1) {
     const snapshot = await getAdjudicationTransaction(hash);
     onUpdate?.(snapshot);
-
-    const terminal = ['ACCEPTED', 'FINALIZED', 'UNDETERMINED', 'CANCELED', 'VALIDATORS_TIMEOUT', 'LEADER_TIMEOUT']
-      .includes(snapshot.status);
-
+    const terminal = ['ACCEPTED', 'FINALIZED', 'UNDETERMINED', 'CANCELED', 'VALIDATORS_TIMEOUT', 'LEADER_TIMEOUT'].includes(snapshot.status);
     if (terminal) {
       assertSuccessful(snapshot.raw);
       return snapshot.raw;
     }
-
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
-
-  throw new Error(
-    'Transaction is still processing after 30 minutes. The transaction ID is preserved; resume tracking instead of submitting again.',
-  );
+  throw new Error('Transaction is still processing after 30 minutes. The transaction ID is preserved; resume tracking instead of submitting again.');
 }
 
-export async function waitForAdjudicationFinalization(
-  hash: VerdictXTransaction,
-  onUpdate?: (status: AdjudicationStatus) => void,
-) {
+export async function waitForAdjudicationFinalization(hash: VerdictXTransaction, onUpdate?: (status: AdjudicationStatus) => void) {
   for (let attempt = 0; attempt < MAX_POLLS; attempt += 1) {
     const snapshot = await getAdjudicationTransaction(hash);
     onUpdate?.(snapshot);
-
     if (snapshot.status === 'FINALIZED') {
       assertSuccessful(snapshot.raw);
       return snapshot.raw;
     }
-
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
-
   throw new Error('Finalization is still pending. Keep the transaction ID and resume tracking later.');
 }
