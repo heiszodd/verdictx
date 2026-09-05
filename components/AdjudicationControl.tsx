@@ -12,6 +12,19 @@ const evidenceUrls = ['https://www.cbn.gov.ng/', 'https://www.nibss-plc.com.ng/'
 type EthereumProvider = { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> };
 declare global { interface Window { ethereum?: EthereumProvider } }
 
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === 'string') return error;
+  if (error && typeof error === 'object') {
+    const value = error as { shortMessage?: unknown; details?: unknown; message?: unknown; cause?: { message?: unknown } };
+    if (typeof value.shortMessage === 'string') return value.shortMessage;
+    if (typeof value.details === 'string') return value.details;
+    if (typeof value.message === 'string') return value.message;
+    if (typeof value.cause?.message === 'string') return value.cause.message;
+  }
+  return 'Adjudication failed for an unknown reason.';
+}
+
 export default function AdjudicationControl({ onVerdict }: { onVerdict?: (verdict: AdjudicationVerdict) => void }) {
   const [status, setStatus] = useState('IDLE');
   const [tx, setTx] = useState('');
@@ -19,6 +32,7 @@ export default function AdjudicationControl({ onVerdict }: { onVerdict?: (verdic
 
   async function start() {
     setError('');
+    setTx('');
     try {
       requireContractAddress();
       if (!window.ethereum) throw new Error('No EVM wallet detected. Install a browser wallet and connect it to GenLayer Bradbury.');
@@ -36,8 +50,9 @@ export default function AdjudicationControl({ onVerdict }: { onVerdict?: (verdic
       onVerdict?.(parseVerdict(String(raw)));
       setStatus('DECISION REACHED');
     } catch (e) {
+      console.error('VerdictX adjudication error:', e);
       setStatus('ERROR');
-      setError(e instanceof Error ? e.message : 'Adjudication failed.');
+      setError(getErrorMessage(e));
     }
   }
 
