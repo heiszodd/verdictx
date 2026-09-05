@@ -40,15 +40,53 @@ async function ensureBradbury(provider: Eip1193Provider) {
   }
 }
 
-export async function deployVerdictXCase(account: ClientAccount, caseId: string, provider: Eip1193Provider): Promise<{ hash: VerdictXTransaction; address: `0x${string}` }> {
+function genToWei(value: string): bigint {
+  const normalized = value.trim();
+  if (!/^\d+(\.\d{1,18})?$/.test(normalized)) throw new Error('Enter a valid GEN amount with up to 18 decimal places.');
+  const [whole, fraction = ''] = normalized.split('.');
+  return BigInt(whole) * 10n ** 18n + BigInt((fraction + '0'.repeat(18)).slice(0, 18));
+}
+
+export async function deployVerdictXCase(account: ClientAccount, caseId: string, providerAddress: `0x${string}`, provider: Eip1193Provider): Promise<{ hash: VerdictXTransaction; address: `0x${string}` }> {
   await ensureBradbury(provider);
   const client = getGenLayerClient(account, provider);
-  const hash = await client.deployContract({ account: account as any, code: VERDICTX_CONTRACT_SOURCE, args: [caseId] });
+  const hash = await client.deployContract({ account: account as any, code: VERDICTX_CONTRACT_SOURCE, args: [caseId, providerAddress] });
   const receipt = await client.waitForTransactionReceipt({ hash: hash as any, status: TransactionStatus.ACCEPTED });
   const raw = receipt as any;
   const address = raw?.contractAddress ?? raw?.contract_address ?? raw?.txDataDecoded?.contractAddress;
   if (!address || typeof address !== 'string') throw new Error('Deployment was accepted but GenLayer did not return the new contract address. Keep the deployment transaction and retry lookup from the explorer.');
   return { hash: hash as VerdictXTransaction, address: address as `0x${string}` };
+}
+
+export async function fundEscrow(account: ClientAccount, contractAddress: `0x${string}`, amountGen: string, provider: Eip1193Provider): Promise<VerdictXTransaction> {
+  await ensureBradbury(provider);
+  const amount = genToWei(amountGen);
+  if (amount <= 0n) throw new Error('Escrow amount must be greater than zero.');
+  const client = getGenLayerClient(account, provider);
+  const txHash = await client.writeContract({ account: account as any, address: contractAddress, functionName: 'fund', args: [], value: amount });
+  return txHash as VerdictXTransaction;
+}
+
+export async function settleEscrow(account: ClientAccount, contractAddress: `0x${string}`, provider: Eip1193Provider): Promise<VerdictXTransaction> {
+  await ensureBradbury(provider);
+  const client = getGenLayerClient(account, provider);
+  const txHash = await client.writeContract({ account: account as any, address: contractAddress, functionName: 'settle', args: [], value: 0n });
+  return txHash as VerdictXTransaction;
+}
+
+export async function getEscrowState(address: `0x${string}`) {
+  const client = getGenLayerClient();
+  const [amount, funded, settled, decision, paymentPercentage, providerAmount, buyerRefund] = await Promise.all([
+    client.readContract({ address, functionName: 'get_amount', args: [] }),
+    client.readContract({ address, functionName: 'is_funded', args: [] }),
+    client.readContract({ address, functionName: 'is_settled', args: [] }),
+    client.readContract({ address, functionName: 'get_decision', args: [] }),
+    client.readContract({ address, functionName: 'get_payment_percentage', args: [] }),
+    client.readContract({ address, functionName: 'get_provider_amount', args: [] }),
+    client.readContract({ address, functionName: 'get_buyer_refund', args: [] }),
+  ]);
+  const toGen = (raw: unknown) => Number(raw) / 1e18;
+  return { amount: toGen(amount), funded: Boolean(funded), settled: Boolean(settled), decision: String(decision), paymentPercentage: Number(paymentPercentage), providerAmount: toGen(providerAmount), buyerRefund: toGen(buyerRefund) };
 }
 
 export async function getVerdictForContract(address: `0x${string}`) {
