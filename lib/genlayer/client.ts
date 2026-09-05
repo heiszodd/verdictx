@@ -11,9 +11,9 @@ const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_VERDICTX_CONTRACT_ADDRESS as `0
 export function getGenLayerClient(account?: ClientAccount, provider?: Eip1193Provider) {
   return createClient({
     chain: testnetBradbury,
-    ...(account ? { account } : {}),
+    ...(account ? { account: account as any } : {}),
     ...(provider ? { provider: provider as any } : {}),
-  });
+  } as any);
 }
 
 export function requireContractAddress() {
@@ -42,11 +42,23 @@ export async function submitAdjudication(
     await client.connect('testnetBradbury');
   }
 
-  const txHash = await client.writeContract({
+  const write = {
     address: requireContractAddress(),
     functionName: 'adjudicate',
     args: [agreement, delivery, dispute, evidenceUrls],
     value: 0n,
+  };
+
+  // Bradbury is fee-charging. Estimate the protocol fee for this exact
+  // adjudication before asking the browser wallet to sign it.
+  const estimate = await client.estimateTransactionFeesForWrite(write);
+
+  const txHash = await client.writeContract({
+    ...write,
+    fees: {
+      distribution: estimate.distribution,
+      feeValue: estimate.feeValue,
+    },
   });
 
   return txHash as VerdictXTransaction;
