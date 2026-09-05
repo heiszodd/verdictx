@@ -43,11 +43,10 @@ export async function submitAdjudication(
   }
 
   const txHash = await client.writeContract({
-    account,
     address: requireContractAddress(),
     functionName: 'adjudicate',
     args: [agreement, delivery, dispute, evidenceUrls],
-    value: 0n,
+    value: 0,
   });
 
   return txHash as VerdictXTransaction;
