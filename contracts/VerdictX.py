@@ -1,8 +1,4 @@
-# {
-#   "Seq": [
-#     { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
-#   ]
-# }
+# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
 from genlayer import *
 import json
 
@@ -112,16 +108,13 @@ Return ONLY this JSON object:
         def validate(leader_result) -> bool:
             if not isinstance(leader_result, gl.vm.Return):
                 return False
-
             proposed = leader_result.calldata
             if not isinstance(proposed, dict):
                 return False
-
             try:
                 independent = evaluate()
                 if not isinstance(independent, dict):
                     return False
-
                 allowed = {
                     "FULL_FULFILLMENT",
                     "PARTIAL_FULFILLMENT",
@@ -133,7 +126,6 @@ Return ONLY this JSON object:
                 independent_decision = str(independent.get("decision", ""))
                 if decision not in allowed or independent_decision not in allowed:
                     return False
-
                 proposed_score = int(proposed.get("fulfillment_score", -1))
                 independent_score = int(independent.get("fulfillment_score", -1))
                 proposed_payment = int(proposed.get("recommended_payment_percentage", -1))
@@ -141,7 +133,8 @@ Return ONLY this JSON object:
                 proposed_confidence = int(proposed.get("confidence", -1))
                 proposed_valid = int(proposed.get("valid_deliverables", -1))
                 proposed_invalid = int(proposed.get("invalid_deliverables", -1))
-
+                independent_valid = int(independent.get("valid_deliverables", -1))
+                independent_invalid = int(independent.get("invalid_deliverables", -1))
                 if not 0 <= proposed_score <= 100 or not 0 <= independent_score <= 100:
                     return False
                 if not 0 <= proposed_payment <= 100 or not 0 <= independent_payment <= 100:
@@ -150,13 +143,14 @@ Return ONLY this JSON object:
                     return False
                 if proposed_valid < 0 or proposed_invalid < 0:
                     return False
-
+                if independent_valid < 0 or independent_invalid < 0:
+                    return False
                 return (
                     decision == independent_decision
                     and abs(proposed_score - independent_score) <= 10
                     and abs(proposed_payment - independent_payment) <= 10
-                    and proposed_valid == int(independent.get("valid_deliverables", -1))
-                    and proposed_invalid == int(independent.get("invalid_deliverables", -1))
+                    and proposed_valid == independent_valid
+                    and proposed_invalid == independent_invalid
                 )
             except Exception:
                 return False
@@ -164,7 +158,6 @@ Return ONLY this JSON object:
         result = gl.vm.run_nondet_unsafe(evaluate, validate)
         if not isinstance(result, dict):
             raise gl.UserError("Invalid adjudication result")
-
         try:
             decision = str(result["decision"])
             score = int(result["fulfillment_score"])
@@ -174,7 +167,6 @@ Return ONLY this JSON object:
             confidence = int(result["confidence"])
         except Exception:
             raise gl.UserError("Adjudication returned malformed structured data")
-
         if decision not in {
             "FULL_FULFILLMENT",
             "PARTIAL_FULFILLMENT",
@@ -191,7 +183,6 @@ Return ONLY this JSON object:
             raise gl.UserError("Invalid payment percentage")
         if not 0 <= confidence <= 100:
             raise gl.UserError("Invalid confidence")
-
         self.decision = decision
         self.fulfillment_score = u256(score)
         self.valid_deliverables = u256(valid)
