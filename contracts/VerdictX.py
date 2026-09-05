@@ -3,6 +3,11 @@ from genlayer import *
 import json
 
 
+MAX_EVIDENCE_URLS = 3
+MAX_TEXT_LENGTH = 12000
+MAX_URL_LENGTH = 2048
+
+
 class VerdictX(gl.Contract):
     case_id: str
     adjudicator: Address
@@ -61,6 +66,16 @@ class VerdictX(gl.Contract):
     def adjudicate(self, agreement: str, delivery: str, dispute: str, evidence_urls: list[str]) -> str:
         if self.decision != "PENDING":
             raise gl.UserError("Case has already been adjudicated")
+
+        if not agreement.strip() or not delivery.strip() or not dispute.strip():
+            raise gl.UserError("Agreement, delivery, and dispute are required")
+        if len(agreement) > MAX_TEXT_LENGTH or len(delivery) > MAX_TEXT_LENGTH or len(dispute) > MAX_TEXT_LENGTH:
+            raise gl.UserError("Case text exceeds the maximum supported length")
+        if len(evidence_urls) > MAX_EVIDENCE_URLS:
+            raise gl.UserError("A maximum of three evidence URLs is supported")
+        for url in evidence_urls:
+            if not isinstance(url, str) or not url.strip() or len(url) > MAX_URL_LENGTH:
+                raise gl.UserError("Evidence URLs must be non-empty and shorter than 2048 characters")
 
         def evaluate() -> dict:
             source_material = ""
