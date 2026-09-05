@@ -54,7 +54,6 @@ export default function AdjudicationControl({ onVerdict }: { onVerdict?: (verdic
   const [snapshot, setSnapshot] = useState<AdjudicationStatus | null>(null);
   const [tx, setTx] = useState<VerdictXTransaction | ''>('');
   const [error, setError] = useState('');
-  const [recovering, setRecovering] = useState(false);
 
   async function track(hash: VerdictXTransaction) {
     setTx(hash);
@@ -70,8 +69,6 @@ export default function AdjudicationControl({ onVerdict }: { onVerdict?: (verdic
       onVerdict?.(parseVerdict(String(raw)));
       setStatus('DECISION REACHED');
     } catch (e) {
-      // A timeout after a successful submission is not a failed submission.
-      // Keep the hash so the next visit can resume the same transaction.
       setError(getErrorMessage(e));
       setStatus('TRACKING PAUSED');
     }
@@ -80,7 +77,6 @@ export default function AdjudicationControl({ onVerdict }: { onVerdict?: (verdic
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY) as VerdictXTransaction | null;
     if (!saved) return;
-    setRecovering(true);
     setTx(saved);
     getAdjudicationTransaction(saved)
       .then((next) => {
@@ -89,16 +85,19 @@ export default function AdjudicationControl({ onVerdict }: { onVerdict?: (verdic
         return track(saved);
       })
       .catch((e) => {
-        localStorage.removeItem(STORAGE_KEY);
-        setRecovering(false);
-        setStatus('IDLE');
+        setStatus('TRACKING PAUSED');
         setError(getErrorMessage(e));
       });
   }, []);
 
-  async function start() {
+  async function startOrResume() {
     setError('');
-    setSnapshot(null);
+    const saved = localStorage.getItem(STORAGE_KEY) as VerdictXTransaction | null;
+    if (saved) {
+      await track(saved);
+      return;
+    }
+
     try {
       requireContractAddress();
       if (!window.ethereum) throw new Error('No EVM wallet detected. Install a browser wallet and connect it to GenLayer Bradbury.');
@@ -108,7 +107,6 @@ export default function AdjudicationControl({ onVerdict }: { onVerdict?: (verdic
       if (!address) throw new Error('Wallet returned no account.');
       setStatus('SUBMITTING TO GENLAYER');
       const hash = await submitAdjudication(address as `0x${string}`, agreement, delivery, dispute, evidenceUrls, window.ethereum);
-      // Persist immediately. From this point onward we never resubmit automatically.
       localStorage.setItem(STORAGE_KEY, hash);
       setTx(hash);
       await track(hash);
@@ -119,11 +117,18 @@ export default function AdjudicationControl({ onVerdict }: { onVerdict?: (verdic
     }
   }
 
+  const buttonLabel = status === 'IDLE'
+    ? 'Start live adjudication →'
+    : status === 'TRACKING PAUSED'
+      ? 'Resume adjudication'
+      : status === 'ERROR'
+        ? 'Retry submission'
+        : status;
   const busy = status !== 'IDLE' && status !== 'ERROR' && status !== 'TRACKING PAUSED';
 
   return <div>
-    <button className="btn primary" onClick={start} disabled={busy || recovering}>
-      {status === 'IDLE' ? 'Start live adjudication →' : status === 'ERROR' ? 'Retry adjudication' : status === 'TRACKING PAUSED' ? 'Resume adjudication' : status}
+    <button className="btn primary" onClick={startOrResume} disabled={busy}>
+      {buttonLabel}
     </button>
     {tx && <div className="tx mono">TX {tx}</div>}
     {snapshot && <div className="mono" style={{marginTop:8,fontSize:10,color:'#697177'}}>
