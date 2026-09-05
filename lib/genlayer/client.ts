@@ -103,15 +103,19 @@ export async function getAdjudicationTransaction(hash: VerdictXTransaction): Pro
   const client = getGenLayerClient();
   const transaction = await client.getTransaction({ hash: hash as any });
   const status = statusName(transaction);
-  let queuePosition: number | null | undefined = transaction?.queuePosition;
-  if (queuePosition === undefined && status === 'PENDING') {
+  const rawQueuePosition = transaction?.queuePosition;
+  let queuePosition: number | null = rawQueuePosition == null ? null : Number(rawQueuePosition);
+
+  if (status === 'PENDING' && queuePosition === null) {
     try {
       const position = await client.getTransactionQueuePosition({ hash: hash as any });
-      queuePosition = typeof position === 'number' ? position : Number(position);
+      const numericPosition = Number(position);
+      queuePosition = Number.isFinite(numericPosition) ? numericPosition : null;
     } catch {
       queuePosition = null;
     }
   }
+
   return {
     hash,
     status,
