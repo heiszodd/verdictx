@@ -57,31 +57,32 @@ async function getLifecycleProjection(client: any, hash: VerdictXTransaction): P
 export async function getAdjudicationTransaction(hash: VerdictXTransaction): Promise<AdjudicationStatus> {
   const client = getGenLayerClient();
   const transaction = await client.getTransaction({ hash: hash as any });
-  const status = statusName(transaction);
+  const transactionData = transaction as any;
+  const status = statusName(transactionData);
   const projection = await getLifecycleProjection(client, hash);
   const lifecycle = String(projection?.lifecycle ?? projection?.state ?? lifecycleForStatus(status)).toUpperCase();
   const projectedStatus = String(projection?.projectedStatus ?? projection?.projected_status ?? status).toUpperCase();
   const resolutionAction = projection?.resolutionAction ?? projection?.resolution_action;
   const resolutionSource = projection?.resolutionSource ?? projection?.resolution_source;
   const decisionActive = projection?.decisionActive ?? projection?.decision_active;
-  const rawQueuePosition = transaction?.queuePosition;
+  const rawQueuePosition = transactionData?.queuePosition;
   let queuePosition: number | null = rawQueuePosition == null ? null : Number(rawQueuePosition);
   if (status === 'PENDING' && queuePosition === null) { try { const position = await client.getTransactionQueuePosition({ hash: hash as any }); const n = Number(position); queuePosition = Number.isFinite(n) ? n : null; } catch { queuePosition = null; } }
   return {
     hash,
     status,
-    execution: executionName(transaction),
+    execution: executionName(transactionData),
     lifecycle,
     projectedStatus,
     resolutionAction: resolutionAction ? String(resolutionAction) : undefined,
     resolutionSource: resolutionSource ? String(resolutionSource) : undefined,
     decisionActive: decisionActive == null ? undefined : Boolean(decisionActive),
     queuePosition,
-    recipient: transaction?.recipient,
-    error: extractExecutionError(transaction),
-    executionHash: transaction?.txExecutionHash ?? transaction?.tx_execution_hash,
-    timestamps: transaction?.timestamps,
-    raw: transaction,
+    recipient: transactionData?.recipient,
+    error: extractExecutionError(transactionData),
+    executionHash: transactionData?.txExecutionHash ?? transactionData?.tx_execution_hash,
+    timestamps: transactionData?.timestamps,
+    raw: transactionData,
   };
 }
 function assertSuccessful(transaction: any) { const status = statusName(transaction); const execution = executionName(transaction); const accepted = status === String(TransactionStatus.ACCEPTED).toUpperCase() || status === String(TransactionStatus.FINALIZED).toUpperCase(); const returned = execution === String(ExecutionResult.FINISHED_WITH_RETURN).toUpperCase(); if (!accepted || !returned) throw new Error(`Transaction failed: ${status} / ${execution}`); }
