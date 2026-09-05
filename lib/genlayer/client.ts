@@ -1,4 +1,4 @@
-import { createClient, isSuccessful } from 'genlayer-js';
+import { createClient } from 'genlayer-js';
 import { testnetBradbury } from 'genlayer-js/chains';
 
 export type VerdictXTransaction = `0x${string}`;
@@ -57,23 +57,25 @@ export async function submitAdjudication(
   }) as Promise<VerdictXTransaction>;
 }
 
-export async function waitForAdjudication(hash: VerdictXTransaction) {
-  const transaction = await getGenLayerClient().waitForDecision({ hash });
-  if (!isSuccessful(transaction)) {
+function assertSuccessful(transaction: { statusName?: string; txExecutionResultName?: string }) {
+  const accepted = transaction.statusName === 'Accepted' || transaction.statusName === 'Finalized';
+  const returned = transaction.txExecutionResultName === 'FinishedWithReturn';
+  if (!accepted || !returned) {
     throw new Error(
-      `Adjudication failed: ${transaction.statusName} / ${transaction.txExecutionResultName}`,
+      `Transaction failed: ${transaction.statusName ?? 'Unknown'} / ${transaction.txExecutionResultName ?? 'Unknown'}`,
     );
   }
+}
+
+export async function waitForAdjudication(hash: VerdictXTransaction) {
+  const transaction = await getGenLayerClient().waitForDecision({ hash });
+  assertSuccessful(transaction);
   return transaction;
 }
 
 export async function waitForAdjudicationFinalization(hash: VerdictXTransaction) {
   const transaction = await getGenLayerClient().waitForFinalization({ hash });
-  if (!isSuccessful(transaction)) {
-    throw new Error(
-      `Adjudication finalization failed: ${transaction.statusName} / ${transaction.txExecutionResultName}`,
-    );
-  }
+  assertSuccessful(transaction);
   return transaction;
 }
 
