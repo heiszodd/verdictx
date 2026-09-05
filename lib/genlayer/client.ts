@@ -6,116 +6,28 @@ import { VERDICTX_CONTRACT_SOURCE } from './verdictx-source';
 export type VerdictXTransaction = `0x${string}`;
 type ClientAccount = `0x${string}`;
 type Eip1193Provider = { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> };
-
 const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_VERDICTX_CONTRACT_ADDRESS as `0x${string}` | undefined;
 const BRADBURY_CHAIN_ID = '0x107d';
 const POLL_INTERVAL_MS = 5_000;
 const MAX_POLLS = 360;
-
-const BRADBURY_NETWORK = {
-  chainId: BRADBURY_CHAIN_ID,
-  chainName: 'GenLayer Bradbury',
-  nativeCurrency: { name: 'GEN', symbol: 'GEN', decimals: 18 },
-  rpcUrls: ['https://rpc-bradbury.genlayer.com'],
-  blockExplorerUrls: ['https://explorer-bradbury.genlayer.com'],
-};
-
-export function getGenLayerClient(account?: ClientAccount, provider?: Eip1193Provider) {
-  return createClient({ chain: testnetBradbury, ...(account ? { account: account as any } : {}), ...(provider ? { provider: provider as any } : {}) } as any);
-}
-
-export function requireContractAddress() {
-  if (!CONTRACT_ADDRESS || CONTRACT_ADDRESS === '0x0000000000000000000000000000000000000000') throw new Error('NEXT_PUBLIC_VERDICTX_CONTRACT_ADDRESS is not configured');
-  return CONTRACT_ADDRESS;
-}
-
-async function ensureBradbury(provider: Eip1193Provider) {
-  const currentChainId = String(await provider.request({ method: 'eth_chainId' })).toLowerCase();
-  if (currentChainId === BRADBURY_CHAIN_ID) return;
-  try { await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: BRADBURY_CHAIN_ID }] }); }
-  catch (error) {
-    const code = error && typeof error === 'object' ? (error as { code?: number }).code : undefined;
-    if (code !== 4902) throw error;
-    await provider.request({ method: 'wallet_addEthereumChain', params: [BRADBURY_NETWORK] });
-  }
-}
-
-function genToWei(value: string): bigint {
-  const normalized = value.trim();
-  if (!/^\d+(\.\d{1,18})?$/.test(normalized)) throw new Error('Enter a valid GEN amount with up to 18 decimal places.');
-  const [whole, fraction = ''] = normalized.split('.');
-  return BigInt(whole) * 10n ** 18n + BigInt((fraction + '0'.repeat(18)).slice(0, 18));
-}
-
-export async function deployVerdictXCase(account: ClientAccount, caseId: string, providerAddress: `0x${string}`, provider: Eip1193Provider): Promise<{ hash: VerdictXTransaction; address: `0x${string}` }> {
-  await ensureBradbury(provider);
-  const client = getGenLayerClient(account, provider);
-  const hash = await client.deployContract({ account: account as any, code: VERDICTX_CONTRACT_SOURCE, args: [caseId, providerAddress] });
-  const receipt = await client.waitForTransactionReceipt({ hash: hash as any, status: TransactionStatus.ACCEPTED });
-  const raw = receipt as any;
-  const address = raw?.contractAddress ?? raw?.contract_address ?? raw?.txDataDecoded?.contractAddress;
-  if (!address || typeof address !== 'string') throw new Error('Deployment was accepted but GenLayer did not return the new contract address. Keep the deployment transaction and retry lookup from the explorer.');
-  return { hash: hash as VerdictXTransaction, address: address as `0x${string}` };
-}
-
-export async function fundEscrow(account: ClientAccount, contractAddress: `0x${string}`, amountGen: string, provider: Eip1193Provider): Promise<VerdictXTransaction> {
-  await ensureBradbury(provider);
-  const amount = genToWei(amountGen);
-  if (amount <= 0n) throw new Error('Escrow amount must be greater than zero.');
-  const client = getGenLayerClient(account, provider);
-  const txHash = await client.writeContract({ account: account as any, address: contractAddress, functionName: 'fund', args: [], value: amount });
-  return txHash as VerdictXTransaction;
-}
-
-export async function settleEscrow(account: ClientAccount, contractAddress: `0x${string}`, provider: Eip1193Provider): Promise<VerdictXTransaction> {
-  await ensureBradbury(provider);
-  const client = getGenLayerClient(account, provider);
-  const txHash = await client.writeContract({ account: account as any, address: contractAddress, functionName: 'settle', args: [], value: 0n });
-  return txHash as VerdictXTransaction;
-}
-
-export async function getEscrowState(address: `0x${string}`) {
-  const client = getGenLayerClient();
-  const [amount, funded, settled, decision, paymentPercentage, providerAmount, buyerRefund] = await Promise.all([
-    client.readContract({ address, functionName: 'get_amount', args: [] }),
-    client.readContract({ address, functionName: 'is_funded', args: [] }),
-    client.readContract({ address, functionName: 'is_settled', args: [] }),
-    client.readContract({ address, functionName: 'get_decision', args: [] }),
-    client.readContract({ address, functionName: 'get_payment_percentage', args: [] }),
-    client.readContract({ address, functionName: 'get_provider_amount', args: [] }),
-    client.readContract({ address, functionName: 'get_buyer_refund', args: [] }),
-  ]);
-  const toGen = (raw: unknown) => Number(raw) / 1e18;
-  return { amount: toGen(amount), funded: Boolean(funded), settled: Boolean(settled), decision: String(decision), paymentPercentage: Number(paymentPercentage), providerAmount: toGen(providerAmount), buyerRefund: toGen(buyerRefund) };
-}
-
-export async function getVerdictForContract(address: `0x${string}`) {
-  return getGenLayerClient().readContract({ address, functionName: 'get_verdict', args: [] });
-}
-
-export async function submitAdjudication(account: ClientAccount, contractAddress: `0x${string}`, agreement: string, delivery: string, dispute: string, evidenceUrls: string[], provider?: Eip1193Provider): Promise<VerdictXTransaction> {
-  const client = getGenLayerClient(account, provider);
-  if (provider) await ensureBradbury(provider);
-  const txHash = await client.writeContract({ account: account as any, address: contractAddress, functionName: 'adjudicate', args: [agreement, delivery, dispute, evidenceUrls], value: 0n });
-  return txHash as VerdictXTransaction;
-}
-
+const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/;
+const BRADBURY_NETWORK = { chainId: BRADBURY_CHAIN_ID, chainName: 'GenLayer Bradbury', nativeCurrency: { name: 'GEN', symbol: 'GEN', decimals: 18 }, rpcUrls: ['https://rpc-bradbury.genlayer.com'], blockExplorerUrls: ['https://explorer-bradbury.genlayer.com'] };
+function requireAddress(value: unknown, label = 'Contract address'): `0x${string}` { if (typeof value !== 'string' || !ADDRESS_RE.test(value)) throw new Error(`${label} is missing or invalid. Expected a 20-byte EVM address.`); return value as `0x${string}`; }
+export function getGenLayerClient(account?: ClientAccount, provider?: Eip1193Provider) { return createClient({ chain: testnetBradbury, ...(account ? { account: account as any } : {}), ...(provider ? { provider: provider as any } : {}) } as any); }
+export function requireContractAddress() { return requireAddress(CONTRACT_ADDRESS, 'NEXT_PUBLIC_VERDICTX_CONTRACT_ADDRESS'); }
+async function ensureBradbury(provider: Eip1193Provider) { const currentChainId = String(await provider.request({ method: 'eth_chainId' })).toLowerCase(); if (currentChainId === BRADBURY_CHAIN_ID) return; try { await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: BRADBURY_CHAIN_ID }] }); } catch (error) { const code = error && typeof error === 'object' ? (error as { code?: number }).code : undefined; if (code !== 4902) throw error; await provider.request({ method: 'wallet_addEthereumChain', params: [BRADBURY_NETWORK] }); } }
+function genToWei(value: string): bigint { const normalized = value.trim(); if (!/^\d+(\.\d{1,18})?$/.test(normalized)) throw new Error('Enter a valid GEN amount with up to 18 decimal places.'); const [whole, fraction = ''] = normalized.split('.'); return BigInt(whole) * 10n ** 18n + BigInt((fraction + '0'.repeat(18)).slice(0, 18)); }
+export async function deployVerdictXCase(account: ClientAccount, caseId: string, providerAddress: `0x${string}`, provider: Eip1193Provider): Promise<{ hash: VerdictXTransaction; address: `0x${string}` }> { requireAddress(account, 'Buyer address'); requireAddress(providerAddress, 'Provider address'); await ensureBradbury(provider); const client = getGenLayerClient(account, provider); const hash = await client.deployContract({ account: account as any, code: VERDICTX_CONTRACT_SOURCE, args: [caseId, providerAddress] }); const receipt = await client.waitForTransactionReceipt({ hash: hash as any, status: TransactionStatus.ACCEPTED }); const raw = receipt as any; const candidate = raw?.txDataDecoded?.contractAddress ?? raw?.contractAddress ?? raw?.contract_address ?? raw?.recipient; return { hash: hash as VerdictXTransaction, address: requireAddress(candidate, 'Deployed contract address') }; }
+export async function fundEscrow(account: ClientAccount, contractAddress: `0x${string}`, amountGen: string, provider: Eip1193Provider): Promise<VerdictXTransaction> { requireAddress(account, 'Buyer address'); const address = requireAddress(contractAddress); await ensureBradbury(provider); const amount = genToWei(amountGen); if (amount <= 0n) throw new Error('Escrow amount must be greater than zero.'); const client = getGenLayerClient(account, provider); return (await client.writeContract({ account: account as any, address, functionName: 'fund', args: [], value: amount })) as VerdictXTransaction; }
+export async function settleEscrow(account: ClientAccount, contractAddress: `0x${string}`, provider: Eip1193Provider): Promise<VerdictXTransaction> { requireAddress(account, 'Buyer address'); const address = requireAddress(contractAddress); await ensureBradbury(provider); const client = getGenLayerClient(account, provider); return (await client.writeContract({ account: account as any, address, functionName: 'settle', args: [], value: 0n })) as VerdictXTransaction; }
+export async function getEscrowState(contractAddress: `0x${string}`) { const address = requireAddress(contractAddress); const client = getGenLayerClient(); const [amount, funded, settled, decision, paymentPercentage, providerAmount, buyerRefund] = await Promise.all([client.readContract({ address, functionName: 'get_amount', args: [] }), client.readContract({ address, functionName: 'is_funded', args: [] }), client.readContract({ address, functionName: 'is_settled', args: [] }), client.readContract({ address, functionName: 'get_decision', args: [] }), client.readContract({ address, functionName: 'get_payment_percentage', args: [] }), client.readContract({ address, functionName: 'get_provider_amount', args: [] }), client.readContract({ address, functionName: 'get_buyer_refund', args: [] })]); const toGen = (raw: unknown) => Number(raw) / 1e18; return { amount: toGen(amount), funded: Boolean(funded), settled: Boolean(settled), decision: String(decision), paymentPercentage: Number(paymentPercentage), providerAmount: toGen(providerAmount), buyerRefund: toGen(buyerRefund) }; }
+export async function getVerdictForContract(address: `0x${string}`) { return getGenLayerClient().readContract({ address: requireAddress(address), functionName: 'get_verdict', args: [] }); }
+export async function submitAdjudication(account: ClientAccount, contractAddress: `0x${string}`, agreement: string, delivery: string, dispute: string, evidenceUrls: string[], provider?: Eip1193Provider): Promise<VerdictXTransaction> { const address = requireAddress(contractAddress); const client = getGenLayerClient(account, provider); if (provider) await ensureBradbury(provider); return (await client.writeContract({ account: account as any, address, functionName: 'adjudicate', args: [agreement, delivery, dispute, evidenceUrls], value: 0n })) as VerdictXTransaction; }
 export type AdjudicationStatus = { hash: VerdictXTransaction; status: string; execution: string; lifecycle: string; queuePosition?: number | null; recipient?: string; raw: any };
 function statusName(transaction: any): string { return String(transaction?.statusName ?? transaction?.status_name ?? 'UNKNOWN').toUpperCase(); }
 function executionName(transaction: any): string { return String(transaction?.txExecutionResultName ?? transaction?.tx_execution_result_name ?? 'NOT_VOTED').toUpperCase(); }
 function lifecycleForStatus(status: string): string { if (['PENDING','PROPOSING','COMMITTING','REVEALING','LEADER_REVEALING'].includes(status)) return 'PROCESSING'; if (['ACCEPTED','UNDETERMINED','VALIDATORS_TIMEOUT','LEADER_TIMEOUT'].includes(status)) return 'DECIDED'; if (status==='FINALIZED') return 'FINALIZED'; if (status==='CANCELED') return 'CANCELED'; return 'PROCESSING'; }
-
-export async function getAdjudicationTransaction(hash: VerdictXTransaction): Promise<AdjudicationStatus> {
-  const client = getGenLayerClient();
-  const transaction = await client.getTransaction({ hash: hash as any });
-  const status = statusName(transaction);
-  const rawQueuePosition = transaction?.queuePosition;
-  let queuePosition: number | null = rawQueuePosition == null ? null : Number(rawQueuePosition);
-  if (status === 'PENDING' && queuePosition === null) { try { const position = await client.getTransactionQueuePosition({ hash: hash as any }); const n = Number(position); queuePosition = Number.isFinite(n) ? n : null; } catch { queuePosition = null; } }
-  return { hash, status, execution: executionName(transaction), lifecycle: lifecycleForStatus(status), queuePosition, recipient: transaction?.recipient, raw: transaction };
-}
-
+export async function getAdjudicationTransaction(hash: VerdictXTransaction): Promise<AdjudicationStatus> { const client = getGenLayerClient(); const transaction = await client.getTransaction({ hash: hash as any }); const status = statusName(transaction); const rawQueuePosition = transaction?.queuePosition; let queuePosition: number | null = rawQueuePosition == null ? null : Number(rawQueuePosition); if (status === 'PENDING' && queuePosition === null) { try { const position = await client.getTransactionQueuePosition({ hash: hash as any }); const n = Number(position); queuePosition = Number.isFinite(n) ? n : null; } catch { queuePosition = null; } } return { hash, status, execution: executionName(transaction), lifecycle: lifecycleForStatus(status), queuePosition, recipient: transaction?.recipient, raw: transaction }; }
 function assertSuccessful(transaction: any) { const status = statusName(transaction); const execution = executionName(transaction); const accepted = status === String(TransactionStatus.ACCEPTED).toUpperCase() || status === String(TransactionStatus.FINALIZED).toUpperCase(); const returned = execution === String(ExecutionResult.FINISHED_WITH_RETURN).toUpperCase(); if (!accepted || !returned) throw new Error(`Transaction failed: ${status} / ${execution}`); }
-
 export async function waitForAdjudication(hash: VerdictXTransaction, onUpdate?: (status: AdjudicationStatus) => void) { for (let attempt=0; attempt<MAX_POLLS; attempt+=1) { const snapshot=await getAdjudicationTransaction(hash); onUpdate?.(snapshot); if (['ACCEPTED','FINALIZED','UNDETERMINED','CANCELED','VALIDATORS_TIMEOUT','LEADER_TIMEOUT'].includes(snapshot.status)) { assertSuccessful(snapshot.raw); return snapshot.raw; } await new Promise((resolve)=>setTimeout(resolve,POLL_INTERVAL_MS)); } throw new Error('Transaction is still processing after 30 minutes. The transaction ID is preserved; resume tracking instead of submitting again.'); }
 export async function waitForAdjudicationFinalization(hash: VerdictXTransaction, onUpdate?: (status: AdjudicationStatus) => void) { for (let attempt=0; attempt<MAX_POLLS; attempt+=1) { const snapshot=await getAdjudicationTransaction(hash); onUpdate?.(snapshot); if (snapshot.status==='FINALIZED') { assertSuccessful(snapshot.raw); return snapshot.raw; } await new Promise((resolve)=>setTimeout(resolve,POLL_INTERVAL_MS)); } throw new Error('Finalization is still pending. Keep the transaction ID and resume tracking later.'); }
