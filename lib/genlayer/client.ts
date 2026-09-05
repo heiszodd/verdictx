@@ -42,23 +42,13 @@ export async function submitAdjudication(
     await client.connect('testnetBradbury');
   }
 
-  const write = {
+  // This project is currently pinned to the installed GenLayerJS API,
+  // whose writeContract accepts value but does not expose the newer fees API.
+  const txHash = await client.writeContract({
     address: requireContractAddress(),
     functionName: 'adjudicate',
     args: [agreement, delivery, dispute, evidenceUrls],
     value: 0n,
-  };
-
-  // Bradbury is fee-charging. Estimate the protocol fee for this exact
-  // adjudication before asking the browser wallet to sign it.
-  const estimate = await client.estimateTransactionFeesForWrite(write);
-
-  const txHash = await client.writeContract({
-    ...write,
-    fees: {
-      distribution: estimate.distribution,
-      feeValue: estimate.feeValue,
-    },
   });
 
   return txHash as VerdictXTransaction;
