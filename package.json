@@ -13,6 +13,7 @@
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "genlayer-js": "1.1.8",
+    "viem": "2.21.54",
     "lucide-react": "latest",
     "next": "latest",
     "react": "latest",
