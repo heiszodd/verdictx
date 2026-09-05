@@ -26,8 +26,8 @@ export default function AdjudicationControl({ onVerdict }: { onVerdict?: (verdic
       const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' }) as string[];
       const address = accounts?.[0];
       if (!address) throw new Error('Wallet returned no account.');
-      setStatus('ESTIMATING FEES');
-      const hash = await submitAdjudication(address, agreement, delivery, dispute, evidenceUrls, window.ethereum);
+      setStatus('SUBMITTING TO GENLAYER');
+      const hash = await submitAdjudication(address as `0x${string}`, agreement, delivery, dispute, evidenceUrls, window.ethereum);
       setTx(hash);
       setStatus('CONSENSUS IN PROGRESS');
       const receipt = await waitForAdjudication(hash);
