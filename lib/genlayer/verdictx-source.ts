@@ -19,9 +19,9 @@ def parse_model_output(value):
     if isinstance(value,dict): return value
     if not isinstance(value,str): return None
     text=value.strip()
-    if text.startswith("```"):
+    if text.startswith("\x60\x60\x60"):
         lines=text.splitlines()[1:]
-        if lines and lines[-1].strip()=="```": lines=lines[:-1]
+        if lines and lines[-1].strip()=="\x60\x60\x60": lines=lines[:-1]
         text="\n".join(lines).strip()
     try:
         parsed=json.loads(text); return parsed if isinstance(parsed,dict) else None
