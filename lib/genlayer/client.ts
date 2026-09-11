@@ -1,4 +1,4 @@
-import { createClient, isSuccessful } from 'genlayer-js';
+import { createClient } from 'genlayer-js';
 import { testnetBradbury } from 'genlayer-js/chains';
 import { TransactionStatus } from 'genlayer-js/types';
 import { VERDICTX_CONTRACT_SOURCE } from './verdictx-source';
@@ -38,9 +38,11 @@ async function ensureBradbury(provider: Eip1193Provider): Promise<void> {
 }
 function genToWei(value: string): bigint { const normalized=value.trim(); if(!/^\d+(\.\d{1,18})?$/.test(normalized)) throw new Error('Enter a valid GEN amount with up to 18 decimal places.'); const [whole,fraction='']=normalized.split('.'); return BigInt(whole)*10n**18n+BigInt((fraction+'0'.repeat(18)).slice(0,18)); }
 
+function transactionSucceeded(transaction:unknown):boolean { return statusName(transaction)==='FINALIZED' && executionName(transaction)==='FINISHED_WITH_RETURN'; }
+
 async function deployedAddress(client: GenLayerClient, hash: VerdictXTransaction): Promise<`0x${string}`> {
   const receipt=await client.waitForTransactionReceipt({hash:hash as never,status:TransactionStatus.FINALIZED});
-  if(!isSuccessful(receipt)) throw new Error(`Deployment failed: ${readString(receipt,'statusName')??'UNKNOWN'} / ${readString(receipt,'txExecutionResultName')??'UNKNOWN'}`);
+  if(!transactionSucceeded(receipt)) throw new Error(`Deployment failed: ${statusName(receipt)} / ${executionName(receipt)}`);
   const direct=readString(receipt,'contractAddress','contract_address'); if(direct) return requireAddress(direct,'Deployed contract address');
   const tx=await client.getTransaction({hash:hash as never}); return requireAddress(readString(asRecord(tx),'recipient','contractAddress','contract_address'),'Deployed contract address');
 }
@@ -52,7 +54,7 @@ export async function deployVerdictXCase(account: ClientAccount, caseId: string,
   const hash=await client.deployContract({account:walletAccount,code:VERDICTX_CONTRACT_SOURCE.trimStart(),args:[caseId,providerAddr,escrowAddress]}) as VerdictXTransaction;
   const address=await deployedAddress(client,hash);
   const configureHash=await client.writeContract({account:walletAccount,address:escrowAddress,functionName:'set_verdict_contract',args:[address],value:0n}) as VerdictXTransaction;
-  const configured=await client.waitForTransactionReceipt({hash:configureHash as never,status:TransactionStatus.FINALIZED}); if(!isSuccessful(configured)) throw new Error('Escrow/verdict bridge configuration did not finalize successfully.');
+  const configured=await client.waitForTransactionReceipt({hash:configureHash as never,status:TransactionStatus.FINALIZED}); if(!transactionSucceeded(configured)) throw new Error('Escrow/verdict bridge configuration did not finalize successfully.');
   return {hash,address,escrowAddress,escrowHash,configureHash};
 }
 
@@ -85,7 +87,7 @@ function extractExecutionError(transaction:unknown):string|undefined{const recor
 async function getLifecycleProjection(client:GenLayerClient,hash:VerdictXTransaction):Promise<UnknownRecord|null>{try{const result=await client.request({method:'gen_getTransactionLifecycle',params:[{txId:hash}]});return asRecord(result);}catch{return null;}}
 
 export async function getAdjudicationTransaction(hash:VerdictXTransaction):Promise<AdjudicationStatus>{const client=getGenLayerClient();const transaction=await client.getTransaction({hash:hash as never});const status=statusName(transaction);const projection=await getLifecycleProjection(client,hash);const lifecycle=(readString(projection,'lifecycle','state')??lifecycleForStatus(status)).toUpperCase();const projectedStatus=(readString(projection,'projectedStatus','projected_status')??status).toUpperCase();const resolutionAction=readString(projection,'resolutionAction','resolution_action');const resolutionSource=readString(projection,'resolutionSource','resolution_source');const decisionActive=readBoolean(projection,'decisionActive','decision_active');const record=asRecord(transaction);let queuePosition=readNumber(record,'queuePosition','queue_position')??null;if(status==='PENDING'&&queuePosition===null){try{const position=await client.getTransactionQueuePosition({hash:hash as never});const n=Number(position);queuePosition=Number.isFinite(n)?n:null;}catch{queuePosition=null;}}return{hash,status,execution:executionName(transaction),lifecycle,projectedStatus,resolutionAction,resolutionSource,decisionActive,queuePosition,recipient:readString(record,'recipient'),error:extractExecutionError(transaction),executionHash:readString(record,'txExecutionHash','tx_execution_hash'),timestamps:asRecord(record?.timestamps)??undefined,raw:transaction};}
-function assertSuccessful(transaction:unknown):void{if(!isSuccessful(transaction))throw new Error(`Transaction failed: ${statusName(transaction)} / ${executionName(transaction)}`);}
+function assertSuccessful(transaction:unknown):void{if(!transactionSucceeded(transaction))throw new Error(`Transaction failed: ${statusName(transaction)} / ${executionName(transaction)}`);}
 export async function waitForAdjudication(hash:VerdictXTransaction,onUpdate?:(status:AdjudicationStatus)=>void){for(let attempt=0;attempt<MAX_POLLS;attempt+=1){const snapshot=await getAdjudicationTransaction(hash);onUpdate?.(snapshot);if(['ACCEPTED','FINALIZED','UNDETERMINED','CANCELED','VALIDATORS_TIMEOUT','LEADER_TIMEOUT'].includes(snapshot.status)){assertSuccessful(snapshot.raw);return snapshot.raw;}await new Promise<void>(resolve=>setTimeout(resolve,POLL_INTERVAL_MS));}throw new Error('Transaction is still processing after 30 minutes. Keep the transaction ID and resume tracking instead of submitting again.');}
 export async function waitForAdjudicationFinalization(hash:VerdictXTransaction,onUpdate?:(status:AdjudicationStatus)=>void){for(let attempt=0;attempt<MAX_POLLS;attempt+=1){const snapshot=await getAdjudicationTransaction(hash);onUpdate?.(snapshot);if(snapshot.status==='FINALIZED'){assertSuccessful(snapshot.raw);return snapshot.raw;}if(['CANCELED','UNDETERMINED','VALIDATORS_TIMEOUT','LEADER_TIMEOUT'].includes(snapshot.status))throw new Error(`Adjudication reached ${snapshot.status}; no irreversible settlement is authorized.`);await new Promise<void>(resolve=>setTimeout(resolve,POLL_INTERVAL_MS));}throw new Error('Finalization is still pending. If the lifecycle reports resolutionAction=Finalize, run `genlayer finalize <txHash>` and resume tracking.');}
 export async function waitForTransactionFinalization(hash:VerdictXTransaction){const client=getGenLayerClient();const receipt=await client.waitForTransactionReceipt({hash:hash as never,status:TransactionStatus.FINALIZED});assertSuccessful(receipt);return receipt;}
