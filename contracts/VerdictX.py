@@ -140,7 +140,7 @@ class VerdictX(gl.Contract):
         agreement: str,
         delivery: str,
         dispute: str,
-        evidence_urls: list[str],
+        evidence_urls: DynArray[str],
     ) -> str:
         if gl.message.sender_address != self.buyer:
             raise gl.UserError("only the buyer can adjudicate this case")
