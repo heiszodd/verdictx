@@ -107,8 +107,12 @@ async function deployedAddress(client: GenLayerClient, hash: VerdictXTransaction
   throw new Error('GenLayer deployment finalized, but the deployed contract address was not returned by Studio-dev.');
 }
 
-async function estimateWriteFees(client: GenLayerClient, write: { address: `0x${string}`; functionName: string; args?: unknown[]; value?: bigint }) {
-  return client.estimateTransactionFeesForWrite(write as never);
+async function estimateWriteFees(
+  client: GenLayerClient,
+  write: { address: `0x${string}`; functionName: string; args?: unknown[]; value?: bigint },
+  options?: { executionHeadroomBps?: bigint; messageHeadroomBps?: bigint },
+) {
+  return client.estimateTransactionFeesForWrite({ ...write, ...options } as never);
 }
 
 async function estimateDeployFees(client: GenLayerClient) {
@@ -186,7 +190,10 @@ export async function submitAdjudication(account: ClientAccount, contractAddress
   const sender = walletAccount(normalizeAddress(account));
   const client = getGenLayerClient(sender.address, provider);
   const write = { address, functionName: 'adjudicate', args: [agreement, delivery, dispute, JSON.stringify(evidenceUrls || [])], value: 0n };
-  const fees = await estimateWriteFees(client, write);
+  // adjudicate executes two nondeterministic evaluations, may render up to three
+  // evidence URLs, and emits a finalized cross-contract bridge call. Give the
+  // simulation-derived estimate explicit headroom for those dynamic branches.
+  const fees = await estimateWriteFees(client, write, { executionHeadroomBps: 10_000n, messageHeadroomBps: 10_000n });
   return await client.writeContract({ account: sender, ...write, fees }) as VerdictXTransaction;
 }
 
