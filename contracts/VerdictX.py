@@ -9,7 +9,7 @@ MAX_DELIVERABLE_COUNT = 100000
 ALLOWED_DECISIONS = {"FULL_FULFILLMENT", "PARTIAL_FULFILLMENT", "NON_FULFILLMENT", "INVALID_CASE", "INCONCLUSIVE"}
 
 
-@gl.evm.contract_interface
+@gl.contract_interface
 class EscrowBridge:
     class View:
         pass
