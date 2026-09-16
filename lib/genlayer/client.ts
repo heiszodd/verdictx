@@ -61,33 +61,34 @@ async function deployedAddress(client: GenLayerClient, hash: VerdictXTransaction
 async function estimateWriteFees(client: GenLayerClient, write: { address: `0x${string}`; functionName: string; args?: unknown[]; value?: bigint }) { return client.estimateTransactionFeesForWrite(write as never); }
 async function estimateDeployFees(client: GenLayerClient) { return client.estimateTransactionFees({ leaderTimeunitsAllocation: 125n, validatorTimeunitsAllocation: 250n, executionBudgetPerRound: 786_500n, totalMessageFees: 0n, appealRounds: 1n, rotations: [1n, 1n] }); }
 
-async function estimateAdjudicationFees(client: GenLayerClient, escrowAddress: `0x${string}`) {
-  // adjudicate emits one internal finalized child message to EscrowBridge.apply_verdict.
-  // The parent must carry an explicit allocation for that child; totalMessageFees alone
-  // does not identify which emitted message receives the budget.
+async function estimateAdjudicationFees(client: GenLayerClient, write: { address: `0x${string}`; functionName: string; args?: unknown[]; value?: bigint }, escrowAddress: `0x${string}`) {
+  // The contract emits EscrowBridge.apply_verdict with on="finalized". This is
+  // an internal message that must be present in the simulation's fee allocation.
+  // Give Studio a deliberately generous baseline, then let its fee accounting
+  // return the actual method-specific preset rather than guessing the final cost.
   const messageAllocations = [{
     messageType: MessageType.Internal,
+    onAcceptance: false,
     recipient: escrowAddress,
     callKey: deriveInternalMessageCallKey('apply_verdict'),
-    budget: 786_500n,
+    budget: 10_000_000n,
     feeParams: encodeInternalMessageFeeParams({
       leaderTimeunitsAllocation: 125n,
       validatorTimeunitsAllocation: 250n,
       appealRounds: 0n,
-      executionBudgetPerRound: 786_500n,
+      executionBudgetPerRound: 10_000_000n,
       rotations: [0n],
     }),
   }];
 
-  return client.estimateTransactionFees({
-    leaderTimeunitsAllocation: 125n,
-    validatorTimeunitsAllocation: 250n,
-    executionBudgetPerRound: 10_000_000n,
-    totalMessageFees: 100_000_000_000_000_000n,
+  return client.estimateTransactionFeesForWrite({
+    ...write,
+    executionBudgetPerRound: 20_000_000n,
+    totalMessageFees: 1_000_000_000_000_000_000n,
     appealRounds: 1n,
     rotations: [1n, 1n],
     messageAllocations,
-  });
+  } as never);
 }
 
 export async function deployVerdictXCase(account: ClientAccount, caseId: string, providerAddress: `0x${string}`, provider: Eip1193Provider): Promise<{ hash: VerdictXTransaction; address: `0x${string}`; escrowAddress: `0x${string}`; escrowHash: VerdictXTransaction; configureHash: VerdictXTransaction }> {
@@ -106,7 +107,7 @@ export async function getEscrowState(contractAddress: `0x${string}`) { const add
 export async function getVerdictForContract(address: `0x${string}`) { return getGenLayerClient().readContract({ address: requireAddress(address), functionName: 'get_verdict', args: [] }); }
 
 export async function submitAdjudication(account: ClientAccount, contractAddress: `0x${string}`, agreement: string, delivery: string, dispute: string, evidenceUrls: string[], provider?: Eip1193Provider): Promise<VerdictXTransaction> {
-  const address = requireAddress(contractAddress, 'VerdictX contract address'); if (!provider) throw new Error('A connected browser wallet is required to submit adjudication.'); await ensureGenLayerNetwork(provider); const sender = walletAccount(normalizeAddress(account)); const client = getGenLayerClient(sender.address, provider); const write = { address, functionName: 'adjudicate', args: [agreement, delivery, dispute, JSON.stringify(evidenceUrls || [])], value: 0n }; const fees = await estimateAdjudicationFees(client, address); return await client.writeContract({ account: sender, ...write, fees }) as VerdictXTransaction;
+  const address = requireAddress(contractAddress, 'VerdictX contract address'); if (!provider) throw new Error('A connected browser wallet is required to submit adjudication.'); await ensureGenLayerNetwork(provider); const sender = walletAccount(normalizeAddress(account)); const client = getGenLayerClient(sender.address, provider); const write = { address, functionName: 'adjudicate', args: [agreement, delivery, dispute, JSON.stringify(evidenceUrls || [])], value: 0n }; const fees = await estimateAdjudicationFees(client, write, requireEscrowAddress()); return await client.writeContract({ account: sender, ...write, fees }) as VerdictXTransaction;
 }
 
 export type AdjudicationStatus = { hash: VerdictXTransaction; status: string; execution: string; lifecycle: string; projectedStatus?: string; resolutionAction?: string; resolutionSource?: string; decisionActive?: boolean; queuePosition?: number | null; recipient?: string; error?: string; executionHash?: string; timestamps?: Record<string, unknown>; raw: unknown };
