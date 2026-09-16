@@ -9,15 +9,6 @@ MAX_DELIVERABLE_COUNT = 100000
 ALLOWED_DECISIONS = {"FULL_FULFILLMENT", "PARTIAL_FULFILLMENT", "NON_FULFILLMENT", "INVALID_CASE", "INCONCLUSIVE"}
 
 
-@gl.contract_interface
-class EscrowBridge:
-    class View:
-        pass
-
-    class Write:
-        def apply_verdict(self, case_id: str, verdict_contract: Address, decision: str, provider_percentage: u256) -> None: ...
-
-
 def parse_model_output(value):
     if isinstance(value, dict):
         return value
@@ -139,12 +130,13 @@ class VerdictX(gl.Contract):
         self.decision, self.fulfillment_score, self.valid_deliverables, self.invalid_deliverables = decision, u256(score), u256(valid), u256(invalid)
         self.recommended_payment_percentage, self.confidence = u256(payment), u256(confidence)
         self.reasoning = str(result.get("reasoning", "")); result["recommended_payment_percentage"] = payment; self.verdict = json.dumps(result, sort_keys=True)
-        EscrowBridge(self.escrow).emit(on="finalized").apply_verdict(self.case_id, gl.message.contract_address, self.decision, u256(payment))
+        gl.get_contract_at(self.escrow).emit(on="finalized").apply_verdict(self.case_id, gl.message.contract_address, self.decision, u256(payment))
         self.bridge_emitted = True
         return self.verdict
 
     @gl.public.write
-    def mark_settled(self):
+    def mark_settled(self) -> bool:
         if gl.message.sender_address != self.escrow: raise gl.UserError("only the configured escrow can mark the case settled")
         if self.decision == "PENDING" or not self.bridge_emitted: raise gl.UserError("case has not reached the settlement bridge")
         self.settled = True
+        return True
