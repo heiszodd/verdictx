@@ -62,32 +62,35 @@ async function estimateWriteFees(client: GenLayerClient, write: { address: `0x${
 async function estimateDeployFees(client: GenLayerClient) { return client.estimateTransactionFees({ leaderTimeunitsAllocation: 125n, validatorTimeunitsAllocation: 250n, executionBudgetPerRound: 786_500n, totalMessageFees: 0n, appealRounds: 1n, rotations: [1n, 1n] }); }
 
 async function estimateAdjudicationFees(client: GenLayerClient, write: { address: `0x${string}`; functionName: string; args?: unknown[]; value?: bigint }, escrowAddress: `0x${string}`) {
-  // The contract emits EscrowBridge.apply_verdict with on="finalized". This is
-  // an internal message that must be present in the simulation's fee allocation.
-  // Give Studio a deliberately generous baseline, then let its fee accounting
-  // return the actual method-specific preset rather than guessing the final cost.
+  // adjudicate emits EscrowBridge.apply_verdict(on="finalized"). The allocation
+  // must therefore match the internal finalized message exactly. The values here
+  // are only the simulation baseline; estimateTransactionFeesForWrite observes
+  // the actual GenVM accounting and returns the final method-specific preset.
+  const simulationBudget = 1_000_000_000n;
   const messageAllocations = [{
     messageType: MessageType.Internal,
     onAcceptance: false,
     recipient: escrowAddress,
     callKey: deriveInternalMessageCallKey('apply_verdict'),
-    budget: 10_000_000n,
+    budget: simulationBudget,
     feeParams: encodeInternalMessageFeeParams({
       leaderTimeunitsAllocation: 125n,
       validatorTimeunitsAllocation: 250n,
       appealRounds: 0n,
-      executionBudgetPerRound: 10_000_000n,
+      executionBudgetPerRound: simulationBudget,
       rotations: [0n],
     }),
   }];
 
   return client.estimateTransactionFeesForWrite({
     ...write,
-    executionBudgetPerRound: 20_000_000n,
-    totalMessageFees: 1_000_000_000_000_000_000n,
+    executionBudgetPerRound: simulationBudget,
+    totalMessageFees: 10_000_000_000_000_000_000n,
     appealRounds: 1n,
     rotations: [1n, 1n],
     messageAllocations,
+    executionHeadroomBps: 12_000n,
+    messageHeadroomBps: 12_000n,
   } as never);
 }
 
@@ -107,16 +110,22 @@ export async function getEscrowState(contractAddress: `0x${string}`) { const add
 export async function getVerdictForContract(address: `0x${string}`) { return getGenLayerClient().readContract({ address: requireAddress(address), functionName: 'get_verdict', args: [] }); }
 
 export async function submitAdjudication(account: ClientAccount, contractAddress: `0x${string}`, agreement: string, delivery: string, dispute: string, evidenceUrls: string[], provider?: Eip1193Provider): Promise<VerdictXTransaction> {
-  const address = requireAddress(contractAddress, 'VerdictX contract address'); if (!provider) throw new Error('A connected browser wallet is required to submit adjudication.'); await ensureGenLayerNetwork(provider); const sender = walletAccount(normalizeAddress(account)); const client = getGenLayerClient(sender.address, provider); const write = { address, functionName: 'adjudicate', args: [agreement, delivery, dispute, JSON.stringify(evidenceUrls || [])], value: 0n }; const fees = await estimateAdjudicationFees(client, write, requireEscrowAddress()); return await client.writeContract({ account: sender, ...write, fees }) as VerdictXTransaction;
+  const address = requireAddress(contractAddress, 'VerdictX contract address'); if (!provider) throw new Error('A connected browser wallet is required to submit adjudication.'); await ensureGenLayerNetwork(provider); const sender = walletAccount(normalizeAddress(account)); const client = getGenLayerClient(sender.address, provider); const write = { address, functionName: 'adjudicate', args: [agreement, delivery, dispute, JSON.stringify(evidenceUrls || [])], value: 0n };
+  // Read the escrow wired into the deployed VerdictX contract instead of trusting
+  // a potentially stale frontend environment variable. The fee allocation key
+  // includes the exact recipient address.
+  const deployedEscrow = String(await client.readContract({ address, functionName: 'get_escrow', args: [] }));
+  const escrowAddress = requireAddress(deployedEscrow, 'VerdictX escrow address');
+  const fees = await estimateAdjudicationFees(client, write, escrowAddress);
+  return await client.writeContract({ account: sender, ...write, fees }) as VerdictXTransaction;
 }
 
 export type AdjudicationStatus = { hash: VerdictXTransaction; status: string; execution: string; lifecycle: string; projectedStatus?: string; resolutionAction?: string; resolutionSource?: string; decisionActive?: boolean; queuePosition?: number | null; recipient?: string; error?: string; executionHash?: string; timestamps?: Record<string, unknown>; raw: unknown };
 function lifecycleForStatus(status: string): string { if (['PENDING','PROPOSING','COMMITTING','REVEALING','LEADER_REVEALING','APPEAL_COMMITTING','APPEAL_REVEALING'].includes(status)) return 'PROCESSING'; if (['ACCEPTED','UNDETERMINED','VALIDATORS_TIMEOUT','LEADER_TIMEOUT'].includes(status)) return 'DECIDED'; if (status === 'FINALIZED') return 'FINALIZED'; if (status === 'CANCELED') return 'CANCELED'; return 'PROCESSING'; }
 function extractExecutionError(transaction: unknown): string | undefined { const record = asRecord(transaction); const candidates = [record?.error,record?.executionError,record?.txExecutionError,record?.txExecutionResultMessage,record?.resultMessage,record?.errorMessage,asRecord(record?.txDataDecoded)?.error,asRecord(record?.receipt)?.error]; for (const value of candidates) if (typeof value === 'string' && value.trim()) return value.trim(); return undefined; }
 async function getLifecycleProjection(client: GenLayerClient, hash: VerdictXTransaction): Promise<UnknownRecord|null> { try { return asRecord(await client.request({ method: 'gen_getTransactionLifecycle', params: [{ txId: hash }] })); } catch { return null; } }
-export async function getAdjudicationTransaction(hash: VerdictXTransaction): Promise<AdjudicationStatus> { const client = getGenLayerClient(); const transaction = await client.getTransaction({ hash: hash as never }); const status = statusName(transaction); const projection = await getLifecycleProjection(client, hash); const lifecycle = (readString(projection,'lifecycle','state') ?? lifecycleForStatus(status)).toUpperCase(); const record = asRecord(transaction); let queuePosition = readNumber(record,'queuePosition','queue_position') ?? null; if (status === 'PENDING' && queuePosition === null) { try { const number = Number(await client.getTransactionQueuePosition({ hash: hash as never })); queuePosition = Number.isFinite(number) ? number : null; } catch { queuePosition = null; } } return { hash, status, execution: executionName(transaction), lifecycle, projectedStatus: (readString(projection,'projectedStatus','projected_status') ?? status).toUpperCase(), resolutionAction: readString(projection,'resolutionAction','resolution_action'), resolutionSource: readString(projection,'resolutionSource','resolution_source'), decisionActive: readBoolean(projection,'decisionActive','decision_active'), queuePosition, recipient: readString(record,'recipient'), error: extractExecutionError(transaction), executionHash: readString(record,'txExecutionHash','tx_execution_hash'), timestamps: asRecord(record?.timestamps) ?? undefined, raw: transaction }; }
-function assertSuccessful(transaction: unknown): void { if (!transactionSucceeded(transaction)) throw new Error(`Transaction failed: ${statusName(transaction)} / ${executionName(transaction)}`); }
-export async function waitForAdjudication(hash: VerdictXTransaction,onUpdate?:(status:AdjudicationStatus)=>void) { for (let attempt=0;attempt<MAX_POLLS;attempt+=1) { const snapshot=await getAdjudicationTransaction(hash); onUpdate?.(snapshot); if (['ACCEPTED','FINALIZED','UNDETERMINED','VALIDATORS_TIMEOUT','LEADER_TIMEOUT','CANCELED'].includes(snapshot.status)) { assertSuccessful(snapshot.raw); return snapshot.raw; } await new Promise<void>(resolve=>setTimeout(resolve,POLL_INTERVAL_MS)); } throw new Error('Transaction is still processing after 30 minutes. Keep the transaction ID and resume tracking instead of submitting again.'); }
-export async function waitForAdjudicationFinalization(hash: VerdictXTransaction,onUpdate?:(status:AdjudicationStatus)=>void) { for (let attempt=0;attempt<MAX_POLLS;attempt+=1) { const snapshot=await getAdjudicationTransaction(hash); onUpdate?.(snapshot); if (snapshot.status==='FINALIZED') { assertSuccessful(snapshot.raw); return snapshot.raw; } if (['CANCELED','UNDETERMINED','VALIDATORS_TIMEOUT','LEADER_TIMEOUT'].includes(snapshot.status)) throw new Error(`Adjudication reached ${snapshot.status}; no irreversible settlement is authorized.`); await new Promise<void>(resolve=>setTimeout(resolve,POLL_INTERVAL_MS)); } throw new Error('Finalization is still pending.'); }
-export async function waitForTransactionFinalization(hash: VerdictXTransaction) { const receipt=await getGenLayerClient().waitForTransactionReceipt({ hash: hash as never, status: TransactionStatus.FINALIZED }); assertSuccessful(receipt); return receipt; }
-export function getDemoFallbackEnabled(): boolean { return process.env.NEXT_PUBLIC_DEMO_FALLBACK === 'true'; }
+export async function getAdjudicationTransaction(hash: VerdictXTransaction): Promise<AdjudicationStatus> { const client = getGenLayerClient(); const transaction = await client.getTransaction({ hash: hash as never }); const status = statusName(transaction); const projection = await getLifecycleProjection(client, hash); const lifecycle = (readString(projection,'lifecycle','state') ?? lifecycleForStatus(status)).toUpperCase(); const execution = executionName(transaction); const error = extractExecutionError(transaction); return { hash, status, execution, lifecycle, projectedStatus: readString(projection,'projectedStatus','projected_status'), resolutionAction: readString(projection,'resolutionAction','resolution_action'), resolutionSource: readString(projection,'resolutionSource','resolution_source'), decisionActive: readBoolean(projection,'decisionActive','decision_active'), queuePosition: readNumber(projection,'queuePosition','queue_position') ?? null, recipient: readString(transaction,'recipient','to'), error, executionHash: readString(transaction,'executionHash','execution_hash'), timestamps: asRecord(transaction)?.timestamps as Record<string, unknown> | undefined, raw: transaction }; }
+
+export function getExplorerUrl(hash: VerdictXTransaction): string { return `${GENLAYER_EXPLORER}/tx/${hash}`; }
+
+export function getVerdictXContractAddress(): `0x${string}` { return requireContractAddress(); }
