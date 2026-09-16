@@ -1,4 +1,4 @@
-# { "Depends": "py-genlayer:9b8kjyda2ycxyq4ea6g4yfpnydxhd52gqba5rb8dw7krkh5mn9p0" }
+# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
 from genlayer import *
 import json
 
@@ -93,17 +93,22 @@ class VerdictX(gl.Contract):
     def is_settled(self) -> bool: return self.settled
 
     @gl.public.write
-    def adjudicate(self, agreement: str, delivery: str, dispute: str, evidence_urls: DynArray[str]) -> str:
+    def adjudicate(self, agreement: str, delivery: str, dispute: str, evidence_urls_json: str) -> str:
         if gl.message.sender_address != self.buyer: raise gl.UserError("only the buyer can adjudicate this case")
         if self.decision != "PENDING": raise gl.UserError("case has already been adjudicated")
         if not agreement.strip() or not delivery.strip() or not dispute.strip(): raise gl.UserError("agreement, delivery, and dispute are required")
         if max(len(agreement), len(delivery), len(dispute)) > MAX_TEXT_LENGTH: raise gl.UserError("case text exceeds the maximum supported length")
-        if len(evidence_urls) > MAX_EVIDENCE_URLS: raise gl.UserError("a maximum of three evidence URLs is supported")
-        for url in evidence_urls:
+        try:
+            urls = json.loads(evidence_urls_json) if evidence_urls_json else []
+        except Exception:
+            raise gl.UserError("evidence_urls_json must be a valid JSON array")
+        if not isinstance(urls, list): raise gl.UserError("evidence_urls_json must be a JSON array")
+        if len(urls) > MAX_EVIDENCE_URLS: raise gl.UserError("a maximum of three evidence URLs is supported")
+        for url in urls:
             if not isinstance(url, str) or not url.strip() or len(url) > MAX_URL_LENGTH: raise gl.UserError("evidence URLs must be non-empty and shorter than 2048 characters")
         def evaluate():
             material = ""
-            for url in evidence_urls:
+            for url in urls:
                 try: material += f"\nSOURCE {url}\n{str(gl.nondet.web.render(url, mode='text'))[:MAX_TEXT_LENGTH]}"
                 except Exception: material += f"\nSOURCE {url}\nUNAVAILABLE"
             prompt = f'''You are the impartial adjudicator for VerdictX. Evaluate the agreement, delivery, dispute, and external evidence. Never invent unavailable facts. Return ONLY JSON with decision, fulfillment_score, valid_deliverables, invalid_deliverables, recommended_payment_percentage, confidence, findings, and reasoning. decision must be FULL_FULFILLMENT, PARTIAL_FULFILLMENT, NON_FULFILLMENT, INVALID_CASE, or INCONCLUSIVE. Scores and payment/confidence are 0-100; counts are non-negative integers.\nAGREEMENT:\n{agreement}\nDELIVERY:\n{delivery}\nDISPUTE:\n{dispute}\nEVIDENCE:\n{material}'''
