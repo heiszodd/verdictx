@@ -1,9 +1,32 @@
 {
   "name": "verdictx",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "private": true,
-  "scripts": { "dev": "next dev", "build": "next build", "start": "next start", "lint": "tsc --noEmit" },
-  "dependencies": { "genlayer-js": "1.1.8", "viem": "2.21.54", "lucide-react": "latest", "next": "latest", "react": "latest", "react-dom": "latest" },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "tsc --noEmit",
+    "contract:lint": "genvm-lint check contracts/VerdictX.py && genvm-lint check contracts/Escrow.py",
+    "contract:test": "pytest tests/direct/ -v",
+    "contract:integration": "gltest tests/integration/ -v -s",
+    "test": "pytest tests/direct/ -v",
+    "deploy:smoke": "tsx scripts/deploy-smoke.ts"
+  },
+  "dependencies": {
+    "genlayer-js": "1.1.8",
+    "viem": "2.21.54",
+    "lucide-react": "latest",
+    "next": "latest",
+    "react": "latest",
+    "react-dom": "latest"
+  },
   "overrides": { "viem": "2.21.54" },
-  "devDependencies": { "@types/node": "latest", "@types/react": "latest", "@types/react-dom": "latest", "typescript": "latest" }
+  "devDependencies": {
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "typescript": "latest",
+    "tsx": "latest"
+  }
 }
