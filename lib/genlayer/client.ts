@@ -60,15 +60,29 @@ async function estimateWriteFees(client: GenLayerClient, write: { address: `0x${
 async function estimateDeployFees(client: GenLayerClient) { return client.estimateTransactionFees({ leaderTimeunitsAllocation: 125n, validatorTimeunitsAllocation: 250n, executionBudgetPerRound: 786_500n, totalMessageFees: 0n, appealRounds: 1n, rotations: [1n, 1n] }); }
 
 async function estimateAdjudicationFees(client: GenLayerClient, write: { address: `0x${string}`; functionName: string; args?: unknown[]; value?: bigint }) {
-  // Let GenLayer simulate the exact adjudicate write and derive the internal
-  // finalized-message allocation. Do not override messageAllocations or budget
-  // envelopes: those overrides can make the submitted fee profile diverge from
-  // the leader/validator execution requirements.
-  return client.estimateTransactionFeesForWrite({
+  // First simulate with a deliberately generous parent budget. Then derive the
+  // final fee preset from Studio's actual GenVM accounting. This is the explicit
+  // two-step path recommended by GenLayer for debugging and message-producing
+  // writes; importantly, we do not hand-build messageAllocations.
+  const baseline = await client.estimateTransactionFees({
+    leaderTimeunitsAllocation: 125n,
+    validatorTimeunitsAllocation: 250n,
+    executionBudgetPerRound: 10_000_000_000n,
+    totalMessageFees: 1_000_000_000_000_000_000n,
+    appealRounds: 1n,
+    rotations: [1n, 1n],
+  });
+
+  const simulation = await client.simulateWriteContract({
     ...write,
-    executionHeadroomBps: 12_000n,
-    messageHeadroomBps: 12_000n,
+    fees: {
+      distribution: baseline.distribution,
+      feeValue: baseline.feeValue,
+    },
+    includeReceipt: true,
   } as never);
+
+  return client.estimateTransactionFeesFromSimulation({ simulation: simulation as never });
 }
 
 export async function deployVerdictXCase(account: ClientAccount, caseId: string, providerAddress: `0x${string}`, provider: Eip1193Provider): Promise<{ hash: VerdictXTransaction; address: `0x${string}`; escrowAddress: `0x${string}`; escrowHash: VerdictXTransaction; configureHash: VerdictXTransaction }> {
@@ -88,9 +102,6 @@ export async function getVerdictForContract(address: `0x${string}`) { return get
 
 export async function submitAdjudication(account: ClientAccount, contractAddress: `0x${string}`, agreement: string, delivery: string, dispute: string, evidenceUrls: string[], provider?: Eip1193Provider): Promise<VerdictXTransaction> {
   const address = requireAddress(contractAddress, 'VerdictX contract address'); if (!provider) throw new Error('A connected browser wallet is required to submit adjudication.'); await ensureGenLayerNetwork(provider); const sender = walletAccount(normalizeAddress(account)); const client = getGenLayerClient(sender.address, provider); const write = { address, functionName: 'adjudicate', args: [agreement, delivery, dispute, JSON.stringify(evidenceUrls || [])], value: 0n };
-  // Read the escrow wired into the deployed VerdictX contract instead of trusting
-  // a potentially stale frontend environment variable. The fee allocation key
-  // includes the exact recipient address.
   const deployedEscrow = String(await client.readContract({ address, functionName: 'get_escrow', args: [] }));
   requireAddress(deployedEscrow, 'VerdictX escrow address');
   const fees = await estimateAdjudicationFees(client, write);
