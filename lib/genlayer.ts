@@ -4,10 +4,14 @@ import { TransactionHashVariant } from 'genlayer-js/types';
 
 export const VERDICTX_CONTRACT = process.env.NEXT_PUBLIC_VERDICTX_CONTRACT_ADDRESS as `0x${string}` | undefined;
 export const ESCROW_CONTRACT = process.env.NEXT_PUBLIC_ESCROW_CONTRACT_ADDRESS as `0x${string}` | undefined;
-export const GENLAYER_RPC = process.env.NEXT_PUBLIC_GENLAYER_RPC || 'https://rpc-bradbury.genlayer.com';
-export const GENLAYER_EXPLORER = process.env.NEXT_PUBLIC_GENLAYER_EXPLORER || 'https://explorer-bradbury.genlayer.com';
+export const GENLAYER_CHAIN_ID = parseChainId(process.env.NEXT_PUBLIC_GENLAYER_CHAIN_ID);
+export const GENLAYER_RPC = process.env.NEXT_PUBLIC_GENLAYER_RPC || 'https://studio-next.genlayer.com/api';
+export const GENLAYER_EXPLORER = process.env.NEXT_PUBLIC_GENLAYER_EXPLORER || 'https://explorer-studio-dev.genlayer.com';
 
-export function getReadClient() { return createClient({ chain: testnetBradbury }); }
+function parseChainId(value?: string): number { const parsed = value?.trim() ? Number(value.trim()) : 61997; return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 61997; }
+const genlayerChain = { ...testnetBradbury, id: GENLAYER_CHAIN_ID, rpcUrls: { ...testnetBradbury.rpcUrls, default: { http: [GENLAYER_RPC] }, public: { http: [GENLAYER_RPC] } }, blockExplorers: { default: { name: 'GenLayer Explorer', url: GENLAYER_EXPLORER } } };
+
+export function getReadClient() { return createClient({ chain: genlayerChain }); }
 
 function requireContractAddress(contractAddress?: `0x${string}`) {
   const address = contractAddress ?? VERDICTX_CONTRACT;
