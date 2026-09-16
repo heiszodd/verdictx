@@ -107,18 +107,37 @@ async function deployedAddress(client: GenLayerClient, hash: VerdictXTransaction
   throw new Error('GenLayer deployment finalized, but the deployed contract address was not returned by Studio-dev.');
 }
 
+async function estimateWriteFees(client: GenLayerClient, write: { address: `0x${string}`; functionName: string; args?: unknown[]; value?: bigint }) {
+  return client.estimateTransactionFeesForWrite(write as never);
+}
+
+async function estimateDeployFees(client: GenLayerClient) {
+  return client.estimateTransactionFees({
+    leaderTimeunitsAllocation: 125n,
+    validatorTimeunitsAllocation: 250n,
+    executionBudgetPerRound: 786_500n,
+    totalMessageFees: 0n,
+    appealRounds: 1n,
+    rotations: [1n, 1n],
+  });
+}
+
 export async function deployVerdictXCase(account: ClientAccount, caseId: string, providerAddress: `0x${string}`, provider: Eip1193Provider): Promise<{ hash: VerdictXTransaction; address: `0x${string}`; escrowAddress: `0x${string}`; escrowHash: VerdictXTransaction; configureHash: VerdictXTransaction }> {
   const buyer = normalizeAddress(account);
   const providerAddr = normalizeAddress(providerAddress);
   await ensureGenLayerNetwork(provider);
   const client = getGenLayerClient(account, provider);
   const sender = walletAccount(buyer);
+  const deployFees = await estimateDeployFees(client);
 
-  const escrowHash = await client.deployContract({ account: sender, code: ESCROW_CONTRACT_SOURCE.trimStart(), args: [caseId, buyer, providerAddr] }) as VerdictXTransaction;
+  const escrowHash = await client.deployContract({ account: sender, code: ESCROW_CONTRACT_SOURCE.trimStart(), args: [caseId, buyer, providerAddr], fees: deployFees }) as VerdictXTransaction;
   const escrowAddress = await deployedAddress(client, escrowHash);
-  const hash = await client.deployContract({ account: sender, code: VERDICTX_CONTRACT_SOURCE.trimStart(), args: [caseId, providerAddr, escrowAddress] }) as VerdictXTransaction;
+  const verdictDeployFees = await estimateDeployFees(client);
+  const hash = await client.deployContract({ account: sender, code: VERDICTX_CONTRACT_SOURCE.trimStart(), args: [caseId, providerAddr, escrowAddress], fees: verdictDeployFees }) as VerdictXTransaction;
   const address = await deployedAddress(client, hash);
-  const configureHash = await client.writeContract({ account: sender, address: escrowAddress, functionName: 'set_verdict_contract', args: [address], value: 0n }) as VerdictXTransaction;
+  const configureWrite = { address: escrowAddress, functionName: 'set_verdict_contract', args: [address], value: 0n };
+  const configureFees = await estimateWriteFees(client, configureWrite);
+  const configureHash = await client.writeContract({ account: sender, ...configureWrite, fees: configureFees }) as VerdictXTransaction;
   const configured = await client.waitForTransactionReceipt({ hash: configureHash as never, status: TransactionStatus.FINALIZED });
   if (!transactionSucceeded(configured)) throw new Error('Escrow/verdict bridge configuration did not finalize successfully.');
   return { hash, address, escrowAddress, escrowHash, configureHash };
@@ -129,7 +148,10 @@ export async function fundEscrow(account: ClientAccount, contractAddress: `0x${s
   await ensureGenLayerNetwork(provider);
   const amount = genToWei(amountGen);
   if (amount <= 0n) throw new Error('Escrow amount must be greater than zero.');
-  return await getGenLayerClient(account, provider).writeContract({ account: walletAccount(normalizeAddress(account)), address, functionName: 'fund', args: [], value: amount }) as VerdictXTransaction;
+  const client = getGenLayerClient(account, provider);
+  const write = { address, functionName: 'fund', args: [], value: amount };
+  const fees = await estimateWriteFees(client, write);
+  return await client.writeContract({ account: walletAccount(normalizeAddress(account)), ...write, fees }) as VerdictXTransaction;
 }
 
 export async function settleEscrow(account: ClientAccount, contractAddress: `0x${string}`, provider: Eip1193Provider, adjudicationHash: VerdictXTransaction): Promise<VerdictXTransaction> {
@@ -140,7 +162,10 @@ export async function settleEscrow(account: ClientAccount, contractAddress: `0x$
   const escrow = await getEscrowState(address);
   if (!escrow.verdictFinalized) throw new Error('The finalized verdict has not reached the escrow settlement bridge yet.');
   if (escrow.settlementBlocked) throw new Error('This case is INVALID or INCONCLUSIVE; escrow remains locked.');
-  return await getGenLayerClient(account, provider).writeContract({ account: walletAccount(normalizeAddress(account)), address, functionName: 'settle', args: [], value: 0n }) as VerdictXTransaction;
+  const client = getGenLayerClient(account, provider);
+  const write = { address, functionName: 'settle', args: [], value: 0n };
+  const fees = await estimateWriteFees(client, write);
+  return await client.writeContract({ account: walletAccount(normalizeAddress(account)), ...write, fees }) as VerdictXTransaction;
 }
 
 export async function getEscrowState(contractAddress: `0x${string}`) {
@@ -160,7 +185,9 @@ export async function submitAdjudication(account: ClientAccount, contractAddress
   await ensureGenLayerNetwork(provider);
   const sender = walletAccount(normalizeAddress(account));
   const client = getGenLayerClient(sender.address, provider);
-  return await client.writeContract({ account: sender, address, functionName: 'adjudicate', args: [agreement, delivery, dispute, JSON.stringify(evidenceUrls || [])], value: 0n }) as VerdictXTransaction;
+  const write = { address, functionName: 'adjudicate', args: [agreement, delivery, dispute, JSON.stringify(evidenceUrls || [])], value: 0n };
+  const fees = await estimateWriteFees(client, write);
+  return await client.writeContract({ account: sender, ...write, fees }) as VerdictXTransaction;
 }
 
 export type AdjudicationStatus = { hash: VerdictXTransaction; status: string; execution: string; lifecycle: string; projectedStatus?: string; resolutionAction?: string; resolutionSource?: string; decisionActive?: boolean; queuePosition?: number | null; recipient?: string; error?: string; executionHash?: string; timestamps?: Record<string, unknown>; raw: unknown };
